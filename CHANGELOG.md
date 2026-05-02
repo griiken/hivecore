@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ## [Unreleased]
 
+### Changed
+
+- **Licence change — Apache-2.0 only (ADR-030, supersedes ADR-002).** Dropped dual MIT-OR-Apache-2.0 in favour of single Apache-2.0. Single root `LICENSE` file (full Apache-2.0 text). `LICENSE-MIT` deleted; `LICENSE-APACHE` content moved into `LICENSE` and the duplicate file deleted. `Cargo.toml` workspace metadata `license = "Apache-2.0"`. README, AGENTS.md, docs/terms.md, docs/governance.md, docs/SESSION-START.md, vendored prompts README all updated. Pre-ADR-030 commits remain dual-licensed forever for the snapshots downstream consumers pulled. Vendored MIT prompt (`hivecore-compaction/prompts/summary.md` from pi-mono) stays under MIT and is included per Apache-2.0 §4.1; vendored Apache-2.0 prompts (Codex / Zed) require no compatibility note. ADR-030 documents alternatives considered (MIT-only, MPL-2.0, AGPL-3.0, BSL — all rejected with rationale).
+
 ### Added
 
 - **HITL approval — session-cache key fix (ADR-029 Rev 6).** `SessionCache` was keyed `(tool_name, sha256(input))` — over-engineered outlier vs all four prior systems. Direct manual source verification (no agent) on 2026-05-03: Codex MCP keys `(server, connector_id, tool_name)` with NO arguments (`mcp_tool_call.rs:1196-1200, 1745-1748`); Codex exec uses `prefix_rule(["git", "status"])` token-prefix; pi has no cache (stateless `runner.ts:775-787`); Goose keys tool-name. Hivecore now matches: keys by `tool_name` alone. User picks "Allow for session" on `edit_file` once → every subsequent `edit_file` call passes regardless of args. Closes the "5 prompts for one logical refactor" fatigue. Argument-glob precision (B3 backlog) preserved as forward-compat — API signatures still accept `input`. `sha2` dep dropped from `hivecore-tool-policy/Cargo.toml`. 165 tests pass (was 163); 2 new in `cache.rs`. Clippy clean.

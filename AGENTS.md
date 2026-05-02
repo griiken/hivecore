@@ -147,9 +147,9 @@ Working if: fewer unnecessary changes in diffs, fewer rewrites from overcomplica
 
 ## Licensing
 
-Dual MIT OR Apache-2.0 at the user's option. New source files need no per-file licence header; the root `LICENSE`, `LICENSE-MIT`, and `LICENSE-APACHE` cover the tree.
+Apache License 2.0 (see ADR-030 — superseded ADR-002's dual MIT-or-Apache-2.0 choice on 2026-05-03). New source files need no per-file licence header; the root `LICENSE` covers the tree.
 
-**Vendored upstream prompts under `crates/hivecore-system-prompt/prompts/` are Apache-2.0** (Codex / Zed). The `prompts/README.md` documents source URLs + sync date.
+**Vendored upstream prompts under `crates/hivecore-system-prompt/prompts/` are Apache-2.0** (Codex / Zed) — same licence, no compatibility friction. The `prompts/README.md` documents source URLs + sync date.
 
 ## Token Efficiency
 

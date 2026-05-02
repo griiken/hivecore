@@ -61,7 +61,7 @@ All seven must pass before merge.
 
 ## 8. Files an agent should never overwrite without explicit instruction
 
-- `LICENSE`, `LICENSE-MIT`, `LICENSE-APACHE`
+- `LICENSE` (Apache-2.0 — see ADR-030)
 - `CODE_OF_CONDUCT.md`, `SECURITY.md`
 - `docs/DECISIONS.md` (append-only — only add new ADRs)
 - `CHANGELOG.md` (append-only — only update `[Unreleased]` and add new versions)

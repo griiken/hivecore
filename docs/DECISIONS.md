@@ -53,3 +53,4 @@ New ADR: copy template above into `docs/adr/<NNN>.md`, then add row below.
 | [027](./adr/027.md) | 2026-05-01 | MCP integration architecture (deferred — design-only) |
 | [028](./adr/028.md) | 2026-05-01 | Browser harness — hybrid a11y-snapshot + delegated vision |
 | [029](./adr/029.md) | 2026-05-03 | Human-in-the-loop approval primitive (Layer-1 trait + ACP wire shape) |
+| [030](./adr/030.md) | 2026-05-03 | Switch to Apache-2.0-only licensing (supersedes ADR-002) |

@@ -5,14 +5,14 @@ Per ADR-024, vendoring upstream prompts requires explicit attribution + a licens
 ## `summary.md`
 
 - **Source.** `badlogic/pi-mono`, file `packages/coding-agent/src/core/compaction/compaction.ts`, constant `SUMMARIZATION_PROMPT` (the template literal beginning `The messages above are a conversation to summarize…`).
-- **License.** MIT (compatible with hivecore's MIT-OR-Apache-2.0 dual-license).
+- **License.** MIT (kept under MIT, attributed; MIT permits inclusion in an Apache-2.0 distribution per Apache-2.0 §4.1 — see ADR-030 for hivecore's Apache-2.0-only licensing).
 - **Synced from.** `https://github.com/badlogic/pi-mono` (branch `main`).
 - **Sync date.** 2026-05-01.
 
 ## `summary_prefix.md`
 
 - **Source.** `openai/codex`, file `codex-rs/core/templates/compact/summary_prefix.md`.
-- **License.** Apache-2.0 (compatible with hivecore's MIT-OR-Apache-2.0 dual-license).
+- **License.** Apache-2.0 — same licence as hivecore (ADR-030); no compatibility note needed.
 - **Synced from.** `https://github.com/openai/codex` (branch `main`).
 - **Sync date.** 2026-05-01.
 

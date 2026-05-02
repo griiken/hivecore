@@ -2,31 +2,26 @@
 
 ## Licence
 
-Hivecore is dual-licensed at the user's option:
+Hivecore is licensed under the **Apache License, Version 2.0** — see [../LICENSE](../LICENSE).
 
-- **MIT License** — see [../LICENSE-MIT](../LICENSE-MIT)
-- **Apache License, Version 2.0** — see [../LICENSE-APACHE](../LICENSE-APACHE)
+ADR-030 supersedes the earlier dual MIT-OR-Apache-2.0 choice (ADR-002) as of 2026-05-03. Snapshots of the tree at commits before that switch remain dual-licensed forever; the going-forward licence is Apache-2.0 only.
 
-You may pick whichever licence suits your downstream use. The two licenses are independent grants; you do not need to comply with both simultaneously.
+### Why Apache-2.0
 
-### Why dual?
-
-- **MIT** maximizes adoption: no patent grant, minimal compliance burden.
-- **Apache-2.0** provides an explicit patent grant and a clear contribution model.
-
-This is the standard pattern in the Rust ecosystem and matches how most major Rust projects (rustc, tokio, serde, etc.) license themselves.
+- **Explicit patent grant** — protects users and contributors against patent-based reprisal in a way bare MIT cannot.
+- **Clear contribution model** — Apache-2.0 §5 already governs the inbound contribution licence; no separate CLA needed.
+- **One file, one rule** — drops the dual-licence indirection that confuses tooling, packagers, and downstream consumers.
+- **Vendored prompts under `crates/hivecore-system-prompt/prompts/` are already Apache-2.0** (Codex / Zed) — single-license matches.
 
 ## Contributions
 
-Contributions are accepted under the same dual MIT OR Apache-2.0 terms. Apache-2.0's explicit patent grant applies to all contributions.
-
-Submitting a contribution implies:
+Contributions are accepted under the **Apache License, Version 2.0** terms. Submitting a contribution (PR, patch, issue with code) implies:
 
 1. You have the right to contribute the code (you wrote it, or you have permission from the owner).
-2. You agree to license it under MIT OR Apache-2.0 at the user's option.
-3. You grant Apache-2.0's patent terms.
+2. You licence your contribution under Apache-2.0 to the project and to downstream users.
+3. You grant the patent terms of Apache-2.0 §3.
 
-No CLA (Contributor License Agreement) is required. The licence terms in `LICENSE-MIT` and `LICENSE-APACHE` are sufficient.
+No CLA (Contributor License Agreement) is required. Apache-2.0 §5 ("Submission of Contributions") is sufficient.
 
 ## Trademarks
 
@@ -38,7 +33,7 @@ You may not use the name "hivecore" in a way that suggests official endorsement 
 
 ## Disclaimer
 
-Hivecore is provided "AS IS" without warranty of any kind. See the licence files for full disclaimer text.
+Hivecore is provided "AS IS" without warranty of any kind. See the licence file for full disclaimer text.
 
 Operating hivecore in production means running autonomous agents that modify code and external systems. Operators are responsible for:
 

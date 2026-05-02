@@ -14,7 +14,7 @@
 
 Hivecore is the substrate. Companies clone it and define **their own agents** (roles — beyond just PM/Dev/QA: compliance officer, firmware reviewer, license auditor, anything), **their own workflow** (DAG as config, not code), and **their own control plane** (policies, budgets, audit, kill switches).
 
-Built around an I/O-free trait core, a pi-shape nested agent loop, an Agent Client Protocol (ACP) server that mounts under Zed / VS Code / Cursor, opt-in MCP integration, a real CDP-backed browser harness, summarising context compaction, and HITL approval primitives — all dual-licensed `MIT OR Apache-2.0`.
+Built around an I/O-free trait core, a pi-shape nested agent loop, an Agent Client Protocol (ACP) server that mounts under Zed / VS Code / Cursor, opt-in MCP integration, a real CDP-backed browser harness, summarising context compaction, and HITL approval primitives — all under `Apache-2.0`.
 
 ## Status — v0.1 substrate
 
@@ -135,7 +135,7 @@ For coding agents working in this tree: read [`AGENTS.md`](./AGENTS.md) — sing
 
 ## License
 
-Dual-licensed under **MIT OR Apache-2.0** at your option. See [LICENSE-MIT](./LICENSE-MIT), [LICENSE-APACHE](./LICENSE-APACHE), and [docs/terms.md](./docs/terms.md).
+Licensed under **Apache License 2.0**. See [LICENSE](./LICENSE) and [docs/terms.md](./docs/terms.md).
 
 ## Contributing
 

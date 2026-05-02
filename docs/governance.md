@@ -40,7 +40,7 @@ See [SECURITY.md](../SECURITY.md). Coordinated disclosure; BDFL approves disclos
 
 ## Forking and disagreement
 
-Hivecore is dual MIT-OR-Apache-2.0. Disagree with a direction? Fork freely. We will publicize legitimate forks in [comparison.md](./comparison.md).
+Hivecore is Apache-2.0 (ADR-030; superseded ADR-002). Disagree with a direction? Fork freely. We will publicize legitimate forks in [comparison.md](./comparison.md).
 
 ## Future evolution
 
