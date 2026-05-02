@@ -18,7 +18,7 @@ Built around an I/O-free trait core, a pi-shape nested agent loop, an Agent Clie
 
 ## Status — v0.1 substrate
 
-Sixteen crates landed under `crates/hivecore-*/`. **165 unit tests + multiple live e2e flows**. See [`AGENTS.md`](./AGENTS.md) for the substrate map.
+Crates landed under `crates/hivecore-*/`. Tests via `cargo test --workspace`. See [`AGENTS.md`](./AGENTS.md) for the substrate map.
 
 | Crate | Layer | What |
 |---|---|---|
@@ -38,7 +38,7 @@ Sixteen crates landed under `crates/hivecore-*/`. **165 unit tests + multiple li
 | `hivecore-mcp-client` | 3 | Opt-in MCP integration (`rmcp 0.8`, stdio) — lazy 3-meta-tool default (`mcp_servers` / `mcp_discover` / `mcp_call`), `read_only_hint` consumption. |
 | `hivecore-tool-policy` | 3 | HITL approval (ADR-029) — `ApprovalHook: impl ToolHook`, `ApprovalPolicy { OnRequest, UnlessTrusted, Never, FailOnAsk }`, 3-state matcher, session cache, `apply_exclude` filter. |
 
-29 ADRs under [`docs/adr/`](./docs/adr/). Newest: ADR-029 (HITL approval primitive) shipped through six revisions tracking pi / Codex / ACP / Warp / Aider / Cline / Continue.dev / Goose / OpenHands SDK / Claude Code prior art.
+ADRs under [`docs/adr/`](./docs/adr/), indexed in [`docs/DECISIONS.md`](./docs/DECISIONS.md). Newest: ADR-029 (HITL approval primitive — pi / Codex / ACP / Warp / Aider / Cline / Continue.dev / Goose / OpenHands SDK / Claude Code prior art) and ADR-030 (Apache-2.0-only licensing).
 
 ## Build
 
@@ -129,7 +129,7 @@ spikes/                 (gone — moved to `crates/hivecore-*/`, ADR-025)
 
 ## Documentation
 
-Start with [`docs/SESSION-START.md`](./docs/SESSION-START.md) for a ten-minute warmup, then [`docs/architecture.md`](./docs/architecture.md) and [`docs/concepts.md`](./docs/concepts.md). [`docs/DECISIONS.md`](./docs/DECISIONS.md) indexes the 29 ADRs.
+Start with [`docs/SESSION-START.md`](./docs/SESSION-START.md) for a ten-minute warmup, then [`docs/architecture.md`](./docs/architecture.md) and [`docs/concepts.md`](./docs/concepts.md). [`docs/DECISIONS.md`](./docs/DECISIONS.md) indexes the ADRs.
 
 For coding agents working in this tree: read [`AGENTS.md`](./AGENTS.md) — single source of truth, picked up automatically by Codex / Cursor / Continue / Cline / Windsurf / Aider / OpenCode / Claude Code.
 
