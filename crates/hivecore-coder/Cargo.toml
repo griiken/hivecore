@@ -1,0 +1,37 @@
+[package]
+name = "hivecore-coder"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "hivecore-coder"
+path = "src/bin/main.rs"
+
+[dependencies]
+hivecore-runtime-core = { path = "../hivecore-runtime-core" }
+hivecore-agent-loop = { path = "../hivecore-agent-loop" }
+hivecore-openai-adapter = { path = "../hivecore-openai-adapter" }
+hivecore-builtin-tools = { path = "../hivecore-builtin-tools" }
+hivecore-persistence = { path = "../hivecore-persistence" }
+hivecore-compaction = { path = "../hivecore-compaction" }
+hivecore-browser-core = { path = "../hivecore-browser-core" }
+hivecore-browser-runtime = { path = "../hivecore-browser-runtime" }
+hivecore-browser-harness = { path = "../hivecore-browser-harness" }
+hivecore-mcp-client = { path = "../hivecore-mcp-client" }
+hivecore-tool-policy = { path = "../hivecore-tool-policy" }
+
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+uuid = { version = "1", features = ["v4"] }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+chrono = { version = "0.4", features = ["serde"] }

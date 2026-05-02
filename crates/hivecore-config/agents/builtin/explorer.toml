@@ -1,0 +1,28 @@
+# Read-only researcher agent. Used as the target of `agent: explorer`
+# in skill frontmatter — the main agent delegates exploration tasks here
+# so context-heavy reading happens in a forked window.
+
+[agent]
+id          = "explorer"
+name        = "Explorer (read-only)"
+version     = "0.1.0"
+description = "Read-only research sub-agent. Reads files and runs grep; never writes or shells out."
+
+[agent.model]
+provider = "openai"
+id       = "gpt-5.4-nano"
+
+[agent.system_prompt]
+inline = """
+You are an exploration sub-agent. The parent agent has handed you a focused
+research task. Read whatever files you need with `read_file` and `grep`.
+Reply with a tight summary — the parent will only see your final message.
+Never write files or run shell commands.
+"""
+
+[agent.tools]
+mode = "allowlist"
+list = ["read_file", "grep"]
+
+[agent.limits]
+max_iterations = 12

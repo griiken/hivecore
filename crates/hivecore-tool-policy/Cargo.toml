@@ -1,0 +1,22 @@
+[package]
+name = "hivecore-tool-policy"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "ADR-029 — tool-call policy plane: HITL approval (ApprovalHook), risk hint augmentation, static tool exclusion, and (v0.2) inspector pipeline. Layer 3."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+hivecore-runtime-core = { path = "../hivecore-runtime-core" }
+
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["sync", "macros", "rt"] }
+parking_lot = "0.12"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }

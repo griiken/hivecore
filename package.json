@@ -1,0 +1,20 @@
+{
+  "name": "hivecore-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hivecore — OSS substrate for org-customizable AI SDLC harnesses (frontend monorepo root).",
+  "scripts": {
+    "lint": "pnpm -r --if-present lint",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "build": "pnpm -r --if-present build",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "prettier": "^3.3.0"
+  },
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,28 @@
+[package]
+name = "hivecore-skills"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+hivecore-runtime-core = { path = "../hivecore-runtime-core" }
+async-trait = "0.1"
+tokio = { version = "1", features = ["fs", "process", "macros", "rt", "sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
+thiserror = "1"
+regex = "1"
+walkdir = "2"
+notify = "7"
+notify-debouncer-mini = "0.5"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"
+hivecore-agent-loop = { path = "../hivecore-agent-loop" }
+hivecore-openai-adapter = { path = "../hivecore-openai-adapter" }

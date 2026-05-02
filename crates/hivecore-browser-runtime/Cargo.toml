@@ -1,0 +1,29 @@
+[package]
+name = "hivecore-browser-runtime"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+hivecore-runtime-core = { path = "../hivecore-runtime-core" }
+hivecore-browser-core = { path = "../hivecore-browser-core" }
+
+# Pin chromiumoxide per ADR-028 §8 (decision tracked alongside gsd-browser).
+chromiumoxide = "=0.9.1"
+
+async-trait = "0.1"
+tokio = { version = "1", features = ["sync", "macros", "rt", "time", "process"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tracing = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+regex = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }

@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  rust:
+    name: Rust workspace
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: hivecore
+          POSTGRES_USER: hivecore
+          POSTGRES_DB: hivecore_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+        if: hashFiles('crates/**/Cargo.toml') != ''
+
+      - name: Build
+        run: cargo check --workspace
+        if: hashFiles('crates/**/Cargo.toml') != ''
+
+      - name: Test
+        run: cargo test --workspace
+        if: hashFiles('crates/**/Cargo.toml') != ''
+        env:
+          DATABASE_URL: postgres://hivecore:hivecore@localhost:5432/hivecore_test
+
+  frontend:
+    name: Frontend (apps/web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+        if: hashFiles('pnpm-lock.yaml') != ''
+
+      - name: Lint
+        run: pnpm --filter ./apps/web lint
+        if: hashFiles('apps/web/package.json') != ''
+
+      - name: Typecheck
+        run: pnpm --filter ./apps/web typecheck
+        if: hashFiles('apps/web/package.json') != ''
+
+      - name: Test
+        run: pnpm --filter ./apps/web test
+        if: hashFiles('apps/web/package.json') != ''
+
+  docs:
+    name: Docs sanity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify docs structure
+        run: |
+          for f in README.md LICENSE LICENSE-MIT LICENSE-APACHE \
+                   CODE_OF_CONDUCT.md SECURITY.md CHANGELOG.md \
+                   CONTRIBUTING.md CLAUDE.md AGENTS.md \
+                   docs/introduction.md docs/vision.md docs/concepts.md \
+                   docs/architecture.md docs/roadmap.md docs/philosophy.md \
+                   docs/comparison.md docs/contributing.md docs/governance.md \
+                   docs/security.md docs/faq.md docs/terms.md \
+                   docs/SESSION-START.md docs/DECISIONS.md \
+                   .research/README.md .research/sources.md; do
+            if [ ! -f "$f" ]; then
+              echo "❌ Missing: $f"
+              exit 1
+            fi
+          done
+          echo "✅ All required docs present"
+
+      - name: Verify no broken relative links in docs/
+        run: |
+          set +e
+          broken=0
+          for md in docs/*.md; do
+            grep -oE '\]\((\.\./)?(docs/|README|LICENSE|CHANGELOG|CONTRIBUTING|CODE_OF_CONDUCT|SECURITY|CLAUDE|AGENTS|\.research/)[^)]*' "$md" | sed 's/^](//' | while read link; do
+              # Strip anchors
+              path="${link%%#*}"
+              # Resolve relative to md file's dir
+              dir="$(dirname "$md")"
+              full="$dir/$path"
+              if [ ! -e "$full" ] && [ ! -e "$path" ]; then
+                echo "❌ Broken link in $md: $path"
+                broken=1
+              fi
+            done
+          done
+          exit 0

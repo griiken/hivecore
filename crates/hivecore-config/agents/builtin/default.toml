@@ -1,0 +1,27 @@
+# Hivecore default SWE assistant agent.
+# v0.1 ships exactly one builtin; orgs override by dropping `*.toml` files
+# into their config dir (resolved by the ACP server / Layer 3 glue).
+
+[agent]
+id          = "default"
+name        = "Default SWE Assistant"
+version     = "0.1.0"
+description = "A concise software-engineering assistant with read/edit/bash/grep access to the workspace."
+
+[agent.model]
+provider = "openai"
+id       = "gpt-5.4-nano"
+
+[agent.system_prompt]
+inline = """
+You are a concise SWE assistant working in a sandbox workspace.
+Use the available tools to read, edit, and run code. Prefer small, verifiable
+edits. When you finish, summarise what you changed in one short paragraph.
+"""
+
+[agent.tools]
+mode = "allowlist"
+list = ["read_file", "write_file", "edit_file", "bash", "grep"]
+
+[agent.limits]
+max_iterations = 16

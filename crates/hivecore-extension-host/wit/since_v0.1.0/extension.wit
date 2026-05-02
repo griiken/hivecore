@@ -1,0 +1,63 @@
+// Hivecore extension contract v0.1.0.
+//
+// Per ADR-017. Versioned directory layout follows Zed's pattern
+// (`since_vX.Y.Z/`) so older extensions keep working when new fields are
+// added: each WIT major bump = new directory, host loads the matching world.
+//
+// v0.1 scope: tool registration + run + a minimal host import surface.
+// Deferred (v0.2+): KG queries, slash commands, hooks, multi-tenant scoping
+// of the host imports.
+
+package hivecore:extension@0.1.0;
+
+interface types {
+    /// Spec for one tool the extension exposes to the model.
+    record tool-spec {
+        /// Stable identifier the model uses to call the tool.
+        name: string,
+        /// Short, human-readable description shown to the model.
+        description: string,
+        /// JSON Schema (encoded as a string) describing the arguments object.
+        parameters-json-schema: string,
+    }
+
+    /// Result of a single tool invocation.
+    record tool-result {
+        /// Free-form text content shown back to the model.
+        content: string,
+        /// True if execution failed in a way the model should see as an
+        /// error (e.g. invalid args, transient failure).
+        is-error: bool,
+    }
+}
+
+/// Host imports — the surface the extension is allowed to call back into.
+/// Intentionally tiny in v0.1; every addition is a load-bearing capability
+/// grant and must be ADR-reviewed.
+interface host {
+    enum log-level { trace, debug, info, warn, error }
+
+    /// Emit a log line via hivecore's tracing pipeline.
+    log: func(level: log-level, message: string);
+
+    /// Read a tenant-scoped setting. Returns `none` if the key is unset.
+    /// (Tenant scoping enforced in the host — extensions never see other
+    /// tenants' settings.)
+    get-setting: func(key: string) -> option<string>;
+}
+
+world extension {
+    use types.{tool-spec, tool-result};
+    import host;
+
+    /// Called once when the extension is first loaded.
+    export init: func();
+
+    /// Return the catalog of tools this extension provides. Called once
+    /// after `init` and again on hot-reload.
+    export list-tools: func() -> list<tool-spec>;
+
+    /// Invoke a previously-registered tool. `args-json` is the model's
+    /// argument object encoded as JSON.
+    export run-tool: func(name: string, args-json: string) -> result<tool-result, string>;
+}

@@ -1,0 +1,109 @@
+[workspace]
+resolver = "2"
+members = [
+    # v0.1 substrate. All ten crates live under `crates/hivecore-*` and
+    # ship 0.1.0 — pre-1.0, breaking changes likely; see each crate's
+    # AGENTS.md for stability notes.
+    "crates/hivecore-runtime-core",
+    "crates/hivecore-openai-adapter",
+    "crates/hivecore-agent-loop",
+    "crates/hivecore-builtin-tools",
+    "crates/hivecore-persistence",
+    "crates/hivecore-acp-server",
+    "crates/hivecore-extension-host",
+    "crates/hivecore-config",
+    "crates/hivecore-skills",
+    "crates/hivecore-system-prompt",
+    # Sample harness — proves substrate composability (different shape than
+    # `hivecore-acp-server`).
+    "crates/hivecore-coder",
+    # ADR-026 Layer-3 compaction crate (planned + now landed).
+    "crates/hivecore-compaction",
+    # ADR-028 browser harness — three coordinated crates.
+    "crates/hivecore-browser-core",
+    "crates/hivecore-browser-runtime",
+    "crates/hivecore-browser-harness",
+    # ADR-027 MCP client — opt-in, scaffold (v0.2 in progress).
+    "crates/hivecore-mcp-client",
+    # ADR-029 tool-call policy — Layer-3 plane: HITL approval (ApprovalHook),
+    # risk-hint augmentation, static exclude, future inspector pipeline.
+    "crates/hivecore-tool-policy",
+]
+exclude = [
+    # The example WASM Component is its own workspace — built with a
+    # different target (wasm32-wasip2) and shouldn't be picked up as a
+    # workspace member.
+    "crates/hivecore-extension-host/examples/hello-extension",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/griflet/hivecore"
+authors = ["griflet <dipendra497@gmail.com>"]
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+
+# HTTP / RPC
+axum = "0.7"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+tonic = "0.12"
+prost = "0.13"
+
+# Storage
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
+pgvector = { version = "0.4", features = ["sqlx"] }
+
+# Errors
+thiserror = "1"
+anyhow = "1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Time / IDs
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.10", features = ["v4", "v7", "serde"] }
+
+# Logging / telemetry
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+opentelemetry = "0.24"
+opentelemetry-otlp = "0.17"
+
+# Graph
+petgraph = "0.6"
+
+# Config
+config = "0.14"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Testing
+insta = { version = "1.40", features = ["yaml"] }
+tempfile = "3.13"
+proptest = "1.5"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.test]
+opt-level = 0
+debug = true

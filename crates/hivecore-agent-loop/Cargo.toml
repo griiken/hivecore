@@ -1,0 +1,25 @@
+[package]
+name = "hivecore-agent-loop"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+hivecore-runtime-core = { path = "../hivecore-runtime-core" }
+async-trait = "0.1"
+tokio = { version = "1", features = ["sync", "macros", "rt"] }
+futures = "0.3"
+thiserror = "1"
+serde_json = "1"
+tracing = "0.1"
+serde = { version = "1", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+async-stream = "0.3"
+hivecore-openai-adapter = { path = "../hivecore-openai-adapter" }

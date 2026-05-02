@@ -1,0 +1,41 @@
+[package]
+name = "hivecore-acp-server"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "hivecore-acp"
+path = "src/bin/main.rs"
+
+[dependencies]
+hivecore-runtime-core = { path = "../hivecore-runtime-core" }
+hivecore-agent-loop = { path = "../hivecore-agent-loop" }
+hivecore-openai-adapter = { path = "../hivecore-openai-adapter" }
+hivecore-builtin-tools = { path = "../hivecore-builtin-tools" }
+hivecore-persistence = { path = "../hivecore-persistence" }
+hivecore-config = { path = "../hivecore-config" }
+hivecore-skills = { path = "../hivecore-skills" }
+hivecore-tool-policy = { path = "../hivecore-tool-policy" }
+
+agent-client-protocol = "0.11"
+
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+async-trait = "0.1"
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"
+parking_lot = "0.12"
