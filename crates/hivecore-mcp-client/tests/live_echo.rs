@@ -50,10 +50,7 @@ async fn discover_lists_tools_from_everything_server() {
         .iter()
         .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
         .collect();
-    assert!(
-        names.iter().any(|n| *n == "echo"),
-        "expected `echo` tool in {names:?}"
-    );
+    assert!(names.contains(&"echo"), "expected `echo` tool in {names:?}");
     eprintln!("[ok] discovered {} tools: {:?}", names.len(), names);
 }
 
