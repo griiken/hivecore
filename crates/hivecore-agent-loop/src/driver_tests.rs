@@ -5,10 +5,11 @@ use async_stream::try_stream;
 use async_trait::async_trait;
 use futures::Stream;
 use hivecore_runtime_core::{
-    AbortSignal, AgentEvent, ContentBlock, HookOutcome, LifecycleEvent, LifecycleHook,
-    LifecycleOutcome, MessageId, ModelAdapter, ModelChunk, ModelRequest, ModelStream,
-    PostHookOutcome, RuntimeError, RuntimeResult, StopReason, TokenUsage, Tool, ToolCallId,
-    ToolHook, ToolHookContext, ToolInvocation, ToolOutcome, ToolPostContext, UpdateSink,
+    AbortSignal, AgentEvent, AgentMessage, AgentState, ContentBlock, ContextTransform, HookOutcome,
+    LifecycleEvent, LifecycleHook, LifecycleOutcome, MessageId, ModelAdapter, ModelChunk,
+    ModelRequest, ModelStream, PostHookOutcome, RuntimeError, RuntimeResult, StopReason,
+    TokenUsage, Tool, ToolCallId, ToolHook, ToolHookContext, ToolInvocation, ToolOutcome,
+    ToolPostContext, UpdateSink,
 };
 
 use super::*;
@@ -320,6 +321,8 @@ impl LifecycleHook for RecordingLifecycle {
             LifecycleEvent::PostMessageCommit { .. } => "post_message_commit",
             LifecycleEvent::PostTurn { .. } => "post_turn",
             LifecycleEvent::AgentEnd { .. } => "agent_end",
+            LifecycleEvent::PreCompact { .. } => "pre_compact",
+            LifecycleEvent::PostCompact { .. } => "post_compact",
         };
         self.seen.lock().unwrap().push(tag);
         LifecycleOutcome::Pass
@@ -378,6 +381,149 @@ impl LifecycleHook for AbortAtPreTurn {
             LifecycleOutcome::Pass
         }
     }
+}
+
+// -- ADR-036: PreCompact / PostCompact lifecycle events ------------------
+
+/// Synthetic transform that fires compaction once after the first turn.
+/// Marker is a `Custom { kind: "compaction_marker", visible_to_model: false }`.
+struct OneShotCompact {
+    fired: Mutex<bool>,
+}
+
+impl std::fmt::Debug for OneShotCompact {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OneShotCompact").finish()
+    }
+}
+
+#[async_trait]
+impl ContextTransform for OneShotCompact {
+    async fn maybe_compact(&self, state: &AgentState) -> RuntimeResult<Option<AgentMessage>> {
+        let mut g = self.fired.lock().unwrap();
+        // Need at least the user prompt + first assistant turn before firing.
+        if *g || state.messages.len() < 2 {
+            return Ok(None);
+        }
+        *g = true;
+        Ok(Some(AgentMessage::Custom {
+            id: MessageId("compact-marker-1".into()),
+            kind: "compaction_marker".into(),
+            payload: serde_json::json!({"trigger":"manual"}),
+            visible_to_model: false,
+        }))
+    }
+}
+
+#[derive(Debug, Default)]
+struct CaptureCompactEvents {
+    seen: Mutex<Vec<&'static str>>,
+}
+
+#[async_trait]
+impl LifecycleHook for CaptureCompactEvents {
+    async fn on_event(&self, event: LifecycleEvent<'_>) -> LifecycleOutcome {
+        match event {
+            LifecycleEvent::PreCompact { .. } => {
+                self.seen.lock().unwrap().push("pre_compact");
+            }
+            LifecycleEvent::PostCompact { .. } => {
+                self.seen.lock().unwrap().push("post_compact");
+            }
+            _ => {}
+        }
+        LifecycleOutcome::Pass
+    }
+}
+
+#[derive(Debug, Default)]
+struct VetoPreCompact;
+
+#[async_trait]
+impl LifecycleHook for VetoPreCompact {
+    async fn on_event(&self, event: LifecycleEvent<'_>) -> LifecycleOutcome {
+        if matches!(event, LifecycleEvent::PreCompact { .. }) {
+            LifecycleOutcome::FailedContinue {
+                reason: "skip this round".into(),
+            }
+        } else {
+            LifecycleOutcome::Pass
+        }
+    }
+}
+
+fn two_text_turns() -> Vec<Vec<ModelChunk>> {
+    vec![
+        vec![
+            ModelChunk::MessageStart { id: mid("m2") },
+            ModelChunk::ContentDelta {
+                id: mid("m2"),
+                delta: ContentBlock::Text { text: "b".into() },
+            },
+            end_chunk(StopReason::EndTurn),
+        ],
+        vec![
+            ModelChunk::MessageStart { id: mid("m1") },
+            ModelChunk::ContentDelta {
+                id: mid("m1"),
+                delta: ContentBlock::Text { text: "a".into() },
+            },
+            end_chunk(StopReason::EndTurn),
+        ],
+    ]
+}
+
+#[tokio::test]
+async fn pre_and_post_compact_fire_in_order() {
+    let model = Arc::new(ScriptedModel::new(two_text_turns()));
+    let transform = Arc::new(OneShotCompact {
+        fired: Mutex::new(false),
+    });
+    let recorder = Arc::new(CaptureCompactEvents::default());
+    let mut agent = AgentLoop::builder()
+        .model(model, "scripted-compact-1")
+        .context_transform(transform.clone() as Arc<dyn ContextTransform>)
+        .lifecycle_hook(recorder.clone() as Arc<dyn LifecycleHook>)
+        .build()
+        .unwrap();
+    let (_h, sig) = AbortSignal::new();
+    // First user prompt produces "a"; second prompt comes via steering — but
+    // we have no steering source, so just run twice.
+    agent.run(user_text("first"), sig.clone()).await.unwrap();
+    agent.run(user_text("second"), sig).await.unwrap();
+
+    let seen = recorder.seen.lock().unwrap().clone();
+    // Compaction fires exactly once on the second run (after >=2 messages).
+    assert_eq!(seen, vec!["pre_compact", "post_compact"]);
+}
+
+#[tokio::test]
+async fn pre_compact_failed_continue_skips_round() {
+    let model = Arc::new(ScriptedModel::new(two_text_turns()));
+    let transform = Arc::new(OneShotCompact {
+        fired: Mutex::new(false),
+    });
+    let recorder = Arc::new(CaptureCompactEvents::default());
+    let mut agent = AgentLoop::builder()
+        .model(model, "scripted-compact-2")
+        .context_transform(transform.clone() as Arc<dyn ContextTransform>)
+        .lifecycle_hook(Arc::new(VetoPreCompact) as Arc<dyn LifecycleHook>)
+        .lifecycle_hook(recorder.clone() as Arc<dyn LifecycleHook>)
+        .build()
+        .unwrap();
+    let (_h, sig) = AbortSignal::new();
+    agent.run(user_text("first"), sig.clone()).await.unwrap();
+    agent.run(user_text("second"), sig).await.unwrap();
+
+    let seen = recorder.seen.lock().unwrap().clone();
+    // Veto runs first → recorder never sees post_compact, but it SHOULD see
+    // pre_compact (the first hook fired before the veto-aborter, since
+    // hooks run in registration order).
+    //
+    // Wait — VetoPreCompact returns FailedContinue, which short-circuits
+    // *the rest of the lifecycle dispatch* for that event. So recorder
+    // never sees pre_compact either. Either way, no post_compact.
+    assert!(!seen.contains(&"post_compact"));
 }
 
 // -- ADR-035: PostHookOutcome::ReplaceAndTerminate -----------------------

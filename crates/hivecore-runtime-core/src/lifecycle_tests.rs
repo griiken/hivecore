@@ -21,6 +21,8 @@ impl LifecycleHook for VecLifecycleHook {
             LifecycleEvent::PostMessageCommit { .. } => "post_message_commit",
             LifecycleEvent::PostTurn { .. } => "post_turn",
             LifecycleEvent::AgentEnd { .. } => "agent_end",
+            LifecycleEvent::PreCompact { .. } => "pre_compact",
+            LifecycleEvent::PostCompact { .. } => "post_compact",
         };
         self.seen.lock().unwrap().push(tag);
         LifecycleOutcome::Pass

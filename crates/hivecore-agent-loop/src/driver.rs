@@ -33,6 +33,13 @@ use crate::registry::ToolRegistry;
 use crate::sink::EventSink;
 use crate::steering::{NoopSteering, SteeringSource};
 
+/// ADR-036 — outcome of `PreCompact` lifecycle dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompactGate {
+    Proceed,
+    Skip,
+}
+
 /// Outcome of a single `run` invocation.
 #[derive(Debug, Clone)]
 pub struct RunOutcome {
@@ -298,11 +305,13 @@ impl AgentLoop {
             .map_err(LoopError::Runtime)
     }
 
-    /// ADR-026 step. Asks the configured `ContextTransform` whether
-    /// compaction should fire. If `Some(marker)` is returned, the marker is
-    /// pushed into `state.messages` (so the disk log records it via the
-    /// `MessageCommitted` event) and lifecycle hooks are notified before the
-    /// next model call.
+    /// ADR-026 + ADR-036 step. Asks the configured `ContextTransform`
+    /// whether compaction should fire. If `Some(marker)` is returned:
+    /// 1. Fires `LifecycleEvent::PreCompact` with the unappended marker —
+    ///    a `FailedContinue` outcome cancels this round.
+    /// 2. Appends the marker to `state.messages` so the disk log records
+    ///    it via the existing `MessageCommitted` path.
+    /// 3. Fires `PostMessageCommit` (unchanged) + `PostCompact`.
     async fn maybe_compact_step(&mut self) -> Result<(), LoopError> {
         let marker = self
             .context_transform
@@ -312,13 +321,56 @@ impl AgentLoop {
         let Some(marker) = marker else {
             return Ok(());
         };
+        // ADR-036 PreCompact — cancellable via FailedContinue.
+        let pre = self
+            .fire_lifecycle_compact(LifecycleEvent::PreCompact {
+                state: &self.state,
+                marker: &marker,
+            })
+            .await?;
+        if pre == CompactGate::Skip {
+            return Ok(());
+        }
         self.state.messages.push(marker.clone());
         self.fire_lifecycle(LifecycleEvent::PostMessageCommit { message: &marker })
             .await?;
+        let marker_id = marker.id().clone();
         self.sink
             .emit(AgentEvent::MessageCommitted { message: marker })
             .await;
+        // ADR-036 PostCompact — informational; non-Pass recorded but no
+        // unwind (the marker is already on disk).
+        self.fire_lifecycle(LifecycleEvent::PostCompact {
+            state: &self.state,
+            marker_id: &marker_id,
+        })
+        .await?;
         Ok(())
+    }
+
+    /// PreCompact-specific dispatch. Distinguishes `FailedContinue` (skip
+    /// compaction this round) from `FailedAbort` / `ManualAttention`
+    /// (bubble), which the generic `fire_lifecycle` collapses.
+    async fn fire_lifecycle_compact(
+        &self,
+        event: LifecycleEvent<'_>,
+    ) -> Result<CompactGate, LoopError> {
+        for hook in &self.lifecycle {
+            match hook.on_event(event.clone()).await {
+                LifecycleOutcome::Pass => {}
+                LifecycleOutcome::FailedContinue { reason } => {
+                    tracing::warn!(reason, "PreCompact hook cancelled compaction round");
+                    return Ok(CompactGate::Skip);
+                }
+                LifecycleOutcome::FailedAbort { reason } => {
+                    return Err(LoopError::HookAborted(reason));
+                }
+                LifecycleOutcome::ManualAttention { reason } => {
+                    return Err(LoopError::ManualAttention(reason));
+                }
+            }
+        }
+        Ok(CompactGate::Proceed)
     }
 
     fn visible_messages(&self) -> Vec<AgentMessage> {

@@ -14,10 +14,11 @@
 
 use async_trait::async_trait;
 
-use crate::ids::{SessionId, TurnId};
+use crate::ids::{MessageId, SessionId, TurnId};
 use crate::message::AgentMessage;
 use crate::message::StopReason;
 use crate::model::ModelRequest;
+use crate::state::AgentState;
 
 /// One enum, many variants — implementors typically match only on the
 /// variants they care about and return `Pass` for the rest.
@@ -51,6 +52,30 @@ pub enum LifecycleEvent<'a> {
     AgentEnd {
         session_id: SessionId,
         stop: StopReason,
+    },
+
+    /// ADR-036 — fired when `ContextTransform::maybe_compact` produced a
+    /// marker but BEFORE it is appended to `state.messages`. A hook
+    /// returning `FailedContinue` cancels this round of compaction (the
+    /// marker is dropped, no event is emitted, the loop continues with the
+    /// original messages). `FailedAbort` / `ManualAttention` bubble as
+    /// usual via `LoopError`. Hooks read the unappended marker payload
+    /// (trigger / tokens / file_refs) directly off `marker` — see
+    /// `crates/hivecore-compaction/src/marker.rs::CompactionMarker`.
+    PreCompact {
+        state: &'a AgentState,
+        marker: &'a AgentMessage,
+    },
+
+    /// ADR-036 — fired after the compaction marker is appended to the
+    /// session log. `marker_id` matches the `id()` of the appended message;
+    /// downstream consumers (audit plane, KG ingestion, frontend progress
+    /// indicators) can correlate against the on-disk `MessageCommitted`
+    /// stream. Non-`Pass` outcomes here are recorded but do not unwind the
+    /// append (compaction is already on disk).
+    PostCompact {
+        state: &'a AgentState,
+        marker_id: &'a MessageId,
     },
 }
 
