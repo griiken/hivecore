@@ -153,7 +153,13 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let writer = if header_existed {
-        SessionWriter::open_append(&path).await?
+        // ADR-032 — re-seed the writer's cursor + id-set from the existing
+        // tree so the next `LeafChange.from` correctly points at the last
+        // leaf on disk and id-collision guarding stays whole-file-aware.
+        let snapshot = SessionReader::open(&path).await?;
+        let leaf = snapshot.leaf_id();
+        let ids = snapshot.issued_ids();
+        SessionWriter::open_append_with_state(&path, leaf, ids).await?
     } else {
         SessionWriter::create(
             &path,
