@@ -398,24 +398,24 @@ impl AgentLoop {
             return Ok(false);
         }
 
-        // Phase 1 — classify each call.
+        // Phase 1 — classify each call. Per-invocation classification
+        // (ADR-034 + ADR-029 A3): tools may dispatch differently based
+        // on the specific arguments (e.g. MCP `mcp_call` consults its
+        // `ToolAnnotations.read_only_hint` cache).
         let mut classified: Vec<(usize, ToolInvocation, ToolExecutionMode)> =
             Vec::with_capacity(calls.len());
         for (idx, call) in calls.into_iter().enumerate() {
+            let invocation = ToolInvocation {
+                id: call.id,
+                name: call.name,
+                input: call.input,
+            };
             let mode = self
                 .tools
-                .get(&call.name)
-                .map(|t| t.execution_mode())
+                .get(&invocation.name)
+                .map(|t| t.execution_mode_for(&invocation))
                 .unwrap_or(ToolExecutionMode::Sequential);
-            classified.push((
-                idx,
-                ToolInvocation {
-                    id: call.id,
-                    name: call.name,
-                    input: call.input,
-                },
-                mode,
-            ));
+            classified.push((idx, invocation, mode));
         }
         let total = classified.len();
         let (parallel, sequential): (Vec<_>, Vec<_>) = classified

@@ -78,6 +78,16 @@ pub trait Tool: Send + Sync {
     fn execution_mode(&self) -> ToolExecutionMode {
         ToolExecutionMode::Parallel
     }
+
+    /// ADR-034 + ADR-029 A3 — per-invocation execution mode. Default
+    /// implementation returns `execution_mode()` ignoring the
+    /// invocation. Tools whose mode varies per call (e.g. MCP tools
+    /// that consult `ToolAnnotations.read_only_hint`) override this
+    /// method to dispatch dynamically. The driver calls this method
+    /// in `dispatch_tools` so dynamic decisions land transparently.
+    fn execution_mode_for(&self, _invocation: &ToolInvocation) -> ToolExecutionMode {
+        self.execution_mode()
+    }
 }
 
 /// Channel for streaming progress updates from a running tool. Cheap to

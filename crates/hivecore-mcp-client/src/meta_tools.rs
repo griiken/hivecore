@@ -164,9 +164,36 @@ impl Tool for McpCallTool {
     }
 
     fn execution_mode(&self) -> ToolExecutionMode {
-        // ADR-034 v0.1 — conservative; v0.2 will dispatch dynamically per
-        // invocation via `RiskHint.read_only` (ADR-029 A3 RiskAugmenter).
+        // Default fallback when the per-invocation lookup can't classify
+        // (unparseable args, unknown server, missing annotations). Safe
+        // default per the MCP spec normative MUST.
         ToolExecutionMode::Sequential
+    }
+
+    fn execution_mode_for(&self, invocation: &ToolInvocation) -> ToolExecutionMode {
+        // ADR-034 + ADR-029 A3 — dynamic dispatch. If the configured
+        // server has `trust_annotations: true` (default) AND the cached
+        // `ToolAnnotations.read_only_hint` is `Some(true)` for this
+        // tool, dispatch in parallel. Anything else (untrusted server,
+        // missing cache entry, `Some(false)`, parse failure) falls
+        // through to Sequential — Goose convention preserved verbatim.
+        let Ok(args) = serde_json::from_value::<CallArgs>(invocation.input.clone()) else {
+            return ToolExecutionMode::Sequential;
+        };
+        let Ok(server_cfg) = self.client.server_config(&args.server) else {
+            return ToolExecutionMode::Sequential;
+        };
+        if !server_cfg.trust_annotations {
+            return ToolExecutionMode::Sequential;
+        }
+        let Some(ann) = self.client.annotations().get(&args.server, &args.tool) else {
+            return ToolExecutionMode::Sequential;
+        };
+        if ann.read_only_hint == Some(true) {
+            ToolExecutionMode::Parallel
+        } else {
+            ToolExecutionMode::Sequential
+        }
     }
 
     fn description(&self) -> &str {
@@ -290,6 +317,109 @@ mod tests {
             .await
             .unwrap();
         assert!(out.is_error);
+    }
+
+    // ADR-034 + ADR-029 A3 — dynamic execution-mode dispatch for mcp_call.
+
+    fn read_only_annotations() -> rmcp::model::ToolAnnotations {
+        rmcp::model::ToolAnnotations {
+            read_only_hint: Some(true),
+            ..Default::default()
+        }
+    }
+
+    fn destructive_annotations() -> rmcp::model::ToolAnnotations {
+        rmcp::model::ToolAnnotations {
+            read_only_hint: Some(false),
+            destructive_hint: Some(true),
+            ..Default::default()
+        }
+    }
+
+    fn cfg_with_server(name: &str) -> McpUserConfig {
+        McpUserConfig::from_toml_str(&format!(
+            r#"
+            [mcp_servers.{name}]
+            command = "noop"
+        "#
+        ))
+        .unwrap()
+    }
+
+    fn call_invocation(server: &str, tool: &str) -> ToolInvocation {
+        invoke(
+            "mcp_call",
+            serde_json::json!({"server": server, "tool": tool, "arguments": {}}),
+        )
+    }
+
+    #[tokio::test]
+    async fn mcp_call_read_only_annotation_dispatches_parallel() {
+        let cfg = cfg_with_server("github");
+        let client = McpClient::new(cfg);
+        client
+            .annotations()
+            .insert("github", "search_issues", read_only_annotations());
+        let tool = McpCallTool::new(client);
+        assert_eq!(
+            tool.execution_mode_for(&call_invocation("github", "search_issues")),
+            ToolExecutionMode::Parallel
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_call_destructive_annotation_dispatches_sequential() {
+        let cfg = cfg_with_server("github");
+        let client = McpClient::new(cfg);
+        client
+            .annotations()
+            .insert("github", "delete_issue", destructive_annotations());
+        let tool = McpCallTool::new(client);
+        assert_eq!(
+            tool.execution_mode_for(&call_invocation("github", "delete_issue")),
+            ToolExecutionMode::Sequential
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_call_missing_annotation_falls_back_sequential() {
+        let cfg = cfg_with_server("github");
+        let tool = McpCallTool::new(McpClient::new(cfg));
+        assert_eq!(
+            tool.execution_mode_for(&call_invocation("github", "uncached_tool")),
+            ToolExecutionMode::Sequential
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_call_untrusted_server_falls_back_sequential() {
+        let cfg = McpUserConfig::from_toml_str(
+            r#"
+            [mcp_servers.untrusted]
+            command = "noop"
+            trust_annotations = false
+        "#,
+        )
+        .unwrap();
+        let client = McpClient::new(cfg);
+        client
+            .annotations()
+            .insert("untrusted", "tool", read_only_annotations());
+        let tool = McpCallTool::new(client);
+        // Even with read_only=true in cache, untrusted server ⇒ Sequential.
+        assert_eq!(
+            tool.execution_mode_for(&call_invocation("untrusted", "tool")),
+            ToolExecutionMode::Sequential
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_call_unknown_server_falls_back_sequential() {
+        let tool = McpCallTool::new(McpClient::new(McpUserConfig::default()));
+        assert_eq!(
+            tool.execution_mode_for(&call_invocation("ghost", "any")),
+            ToolExecutionMode::Sequential
+        );
     }
 
     #[test]
