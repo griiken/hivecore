@@ -198,8 +198,17 @@ impl AgentLoop {
                 }
 
                 // Run all tool calls; failures inside hooks short-circuit.
-                self.dispatch_tools(turn_id, tool_calls, signal.clone())
+                // ADR-035: AND-across-batch terminate hint. If every
+                // finalized post-hook returned `ReplaceAndTerminate`, the
+                // batch agreed to end the turn — set EndTurn and exit
+                // without another model call.
+                let terminate = self
+                    .dispatch_tools(turn_id, tool_calls, signal.clone())
                     .await?;
+                if terminate {
+                    last_stop = StopReason::EndTurn;
+                    break 'outer;
+                }
             }
 
             // Outer-stage follow-ups (post-stop). If a source supplies more
@@ -326,8 +335,13 @@ impl AgentLoop {
         turn_id: TurnId,
         calls: Vec<ToolCallRequest>,
         signal: AbortSignal,
-    ) -> Result<(), LoopError> {
+    ) -> Result<bool, LoopError> {
+        // ADR-035: AND-across-batch terminate. Empty batch never terminates;
+        // any single non-`ReplaceAndTerminate` post-hook flips this off.
+        let mut any_call = false;
+        let mut all_terminate = true;
         for call in calls {
+            any_call = true;
             let invocation = ToolInvocation {
                 id: call.id.clone(),
                 name: call.name.clone(),
@@ -349,8 +363,13 @@ impl AgentLoop {
                 }
             };
 
-            // Post-hooks. Last `Replace` wins.
-            let final_outcome = self.run_post_hooks(turn_id, &invocation, outcome).await;
+            // Post-hooks. Last `Replace` / `ReplaceAndTerminate` wins on the
+            // outcome AND the terminate flag.
+            let (final_outcome, terminate) =
+                self.run_post_hooks(turn_id, &invocation, outcome).await;
+            if !terminate {
+                all_terminate = false;
+            }
 
             self.sink
                 .emit(AgentEvent::ToolExecEnd {
@@ -374,7 +393,7 @@ impl AgentLoop {
                 .emit(AgentEvent::MessageCommitted { message: tool_msg })
                 .await;
         }
-        Ok(())
+        Ok(any_call && all_terminate)
     }
 
     async fn run_pre_hooks(&self, turn_id: TurnId, invocation: &ToolInvocation) -> HookDecision {
@@ -404,7 +423,11 @@ impl AgentLoop {
         turn_id: TurnId,
         invocation: &ToolInvocation,
         mut outcome: ToolOutcome,
-    ) -> ToolOutcome {
+    ) -> (ToolOutcome, bool) {
+        // ADR-035: terminate flag is "last hook wins" — same rule as outcome.
+        // Pass leaves the running flag untouched; Replace clears it; only
+        // ReplaceAndTerminate sets it.
+        let mut terminate = false;
         for hook in &self.hooks {
             let ctx = ToolPostContext {
                 session_id: self.state.session_id,
@@ -412,11 +435,19 @@ impl AgentLoop {
                 invocation,
                 outcome: &outcome,
             };
-            if let PostHookOutcome::Replace(new_outcome) = hook.after(ctx).await {
-                outcome = new_outcome;
+            match hook.after(ctx).await {
+                PostHookOutcome::Pass => {}
+                PostHookOutcome::Replace(new_outcome) => {
+                    outcome = new_outcome;
+                    terminate = false;
+                }
+                PostHookOutcome::ReplaceAndTerminate(new_outcome) => {
+                    outcome = new_outcome;
+                    terminate = true;
+                }
             }
         }
-        outcome
+        (outcome, terminate)
     }
 
     async fn execute_tool(

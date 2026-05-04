@@ -42,6 +42,12 @@ pub enum HookOutcome {
 pub enum PostHookOutcome {
     Pass,
     Replace(ToolOutcome),
+    /// Same as `Replace`, plus a hint that the agent loop should stop after
+    /// the current tool batch settles. Early termination only fires when
+    /// EVERY finalized tool result in the batch carries this flag — single
+    /// dissenter ⇒ loop continues normally. Preserves "any tool can keep
+    /// the conversation alive" semantics. ADR-035.
+    ReplaceAndTerminate(ToolOutcome),
 }
 
 #[async_trait]

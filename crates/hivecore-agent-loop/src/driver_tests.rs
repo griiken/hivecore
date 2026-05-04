@@ -5,9 +5,10 @@ use async_stream::try_stream;
 use async_trait::async_trait;
 use futures::Stream;
 use hivecore_runtime_core::{
-    AbortSignal, AgentEvent, ContentBlock, LifecycleEvent, LifecycleHook, LifecycleOutcome,
-    MessageId, ModelAdapter, ModelChunk, ModelRequest, ModelStream, RuntimeError, RuntimeResult,
-    StopReason, TokenUsage, Tool, ToolCallId, ToolInvocation, ToolOutcome, UpdateSink,
+    AbortSignal, AgentEvent, ContentBlock, HookOutcome, LifecycleEvent, LifecycleHook,
+    LifecycleOutcome, MessageId, ModelAdapter, ModelChunk, ModelRequest, ModelStream,
+    PostHookOutcome, RuntimeError, RuntimeResult, StopReason, TokenUsage, Tool, ToolCallId,
+    ToolHook, ToolHookContext, ToolInvocation, ToolOutcome, ToolPostContext, UpdateSink,
 };
 
 use super::*;
@@ -377,6 +378,151 @@ impl LifecycleHook for AbortAtPreTurn {
             LifecycleOutcome::Pass
         }
     }
+}
+
+// -- ADR-035: PostHookOutcome::ReplaceAndTerminate -----------------------
+
+/// Hook that always returns `ReplaceAndTerminate` from `after`.
+#[derive(Debug)]
+struct AlwaysTerminate;
+
+#[async_trait]
+impl ToolHook for AlwaysTerminate {
+    async fn before(&self, _ctx: ToolHookContext<'_>) -> HookOutcome {
+        HookOutcome::Pass
+    }
+    async fn after(&self, ctx: ToolPostContext<'_>) -> PostHookOutcome {
+        PostHookOutcome::ReplaceAndTerminate(ctx.outcome.clone())
+    }
+}
+
+/// Hook whose `after` returns Replace (no terminate). Used to verify the
+/// AND-across-batch rule: a single dissenter keeps the loop alive even if
+/// other hooks set terminate.
+#[derive(Debug)]
+struct AlwaysReplaceNoTerminate;
+
+#[async_trait]
+impl ToolHook for AlwaysReplaceNoTerminate {
+    async fn before(&self, _ctx: ToolHookContext<'_>) -> HookOutcome {
+        HookOutcome::Pass
+    }
+    async fn after(&self, ctx: ToolPostContext<'_>) -> PostHookOutcome {
+        PostHookOutcome::Replace(ctx.outcome.clone())
+    }
+}
+
+fn one_tool_call_then_text() -> Vec<Vec<ModelChunk>> {
+    vec![
+        // Second turn (only reached if loop continues): plain text + EndTurn.
+        vec![
+            ModelChunk::MessageStart { id: mid("m2") },
+            ModelChunk::ContentDelta {
+                id: mid("m2"),
+                delta: ContentBlock::Text {
+                    text: "after".into(),
+                },
+            },
+            ModelChunk::MessageEnd {
+                id: mid("m2"),
+                stop_reason: StopReason::EndTurn,
+                usage: TokenUsage::default(),
+            },
+        ],
+        // First turn: emits one tool call.
+        vec![
+            ModelChunk::MessageStart { id: mid("m1") },
+            ModelChunk::ContentDelta {
+                id: mid("m1"),
+                delta: ContentBlock::ToolUse {
+                    id: ToolCallId("c1".into()),
+                    name: "echo".into(),
+                    input: serde_json::json!({"text": "x"}),
+                },
+            },
+            ModelChunk::MessageEnd {
+                id: mid("m1"),
+                stop_reason: StopReason::ToolUse,
+                usage: TokenUsage::default(),
+            },
+        ],
+    ]
+}
+
+#[tokio::test]
+async fn replace_and_terminate_stops_after_tool_batch() {
+    let model = Arc::new(ScriptedModel::new(one_tool_call_then_text()));
+    let tools = ToolRegistry::new(vec![Arc::new(EchoTool) as Arc<dyn Tool>]);
+    let mut agent = AgentLoop::builder()
+        .model(model, "scripted-term-1")
+        .tools(tools)
+        .hook(Arc::new(AlwaysTerminate) as Arc<dyn ToolHook>)
+        .build()
+        .unwrap();
+    let (_h, sig) = AbortSignal::new();
+    let outcome = agent.run(user_text("go"), sig).await.unwrap();
+
+    // Loop must end at EndTurn after the first tool batch — model's second
+    // turn must not be consumed.
+    assert_eq!(outcome.stop_reason, StopReason::EndTurn);
+    // user + asst-1(toolUse) + tool_result = 3 (NO asst-2 from second script)
+    assert_eq!(outcome.messages_appended, 3);
+}
+
+#[tokio::test]
+async fn replace_alone_does_not_terminate() {
+    let model = Arc::new(ScriptedModel::new(one_tool_call_then_text()));
+    let tools = ToolRegistry::new(vec![Arc::new(EchoTool) as Arc<dyn Tool>]);
+    let mut agent = AgentLoop::builder()
+        .model(model, "scripted-term-2")
+        .tools(tools)
+        .hook(Arc::new(AlwaysReplaceNoTerminate) as Arc<dyn ToolHook>)
+        .build()
+        .unwrap();
+    let (_h, sig) = AbortSignal::new();
+    let outcome = agent.run(user_text("go"), sig).await.unwrap();
+
+    // Loop must continue and consume the second model script.
+    assert_eq!(outcome.stop_reason, StopReason::EndTurn);
+    assert_eq!(outcome.messages_appended, 4);
+}
+
+#[tokio::test]
+async fn last_hook_wins_terminate_after_replace() {
+    // Hook order: Replace (no terminate), then ReplaceAndTerminate.
+    // Last wins ⇒ terminate.
+    let model = Arc::new(ScriptedModel::new(one_tool_call_then_text()));
+    let tools = ToolRegistry::new(vec![Arc::new(EchoTool) as Arc<dyn Tool>]);
+    let mut agent = AgentLoop::builder()
+        .model(model, "scripted-term-3")
+        .tools(tools)
+        .hook(Arc::new(AlwaysReplaceNoTerminate) as Arc<dyn ToolHook>)
+        .hook(Arc::new(AlwaysTerminate) as Arc<dyn ToolHook>)
+        .build()
+        .unwrap();
+    let (_h, sig) = AbortSignal::new();
+    let outcome = agent.run(user_text("go"), sig).await.unwrap();
+    assert_eq!(outcome.stop_reason, StopReason::EndTurn);
+    assert_eq!(outcome.messages_appended, 3);
+}
+
+#[tokio::test]
+async fn last_hook_wins_replace_after_terminate() {
+    // Hook order: ReplaceAndTerminate, then Replace (clears terminate).
+    // Last wins ⇒ no terminate; loop continues.
+    let model = Arc::new(ScriptedModel::new(one_tool_call_then_text()));
+    let tools = ToolRegistry::new(vec![Arc::new(EchoTool) as Arc<dyn Tool>]);
+    let mut agent = AgentLoop::builder()
+        .model(model, "scripted-term-4")
+        .tools(tools)
+        .hook(Arc::new(AlwaysTerminate) as Arc<dyn ToolHook>)
+        .hook(Arc::new(AlwaysReplaceNoTerminate) as Arc<dyn ToolHook>)
+        .build()
+        .unwrap();
+    let (_h, sig) = AbortSignal::new();
+    let outcome = agent.run(user_text("go"), sig).await.unwrap();
+    assert_eq!(outcome.stop_reason, StopReason::EndTurn);
+    assert_eq!(outcome.messages_appended, 4);
 }
 
 #[tokio::test]
