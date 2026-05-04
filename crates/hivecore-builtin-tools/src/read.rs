@@ -4,9 +4,12 @@
 //! reuse training-time familiarity:
 //!     { path: string, offset?: u32, limit?: u32 }
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use hivecore_runtime_core::{
-    AbortSignal, ContentBlock, RuntimeResult, Tool, ToolInvocation, ToolOutcome, UpdateSink,
+    AbortSignal, ContentBlock, ExecutionEnv, RuntimeError, RuntimeResult, Tool, ToolInvocation,
+    ToolOutcome, UpdateSink,
 };
 use serde::Deserialize;
 
@@ -18,11 +21,12 @@ const DEFAULT_LIMIT: u32 = 2000;
 #[derive(Debug, Clone)]
 pub struct ReadTool {
     root: WorkspaceRoot,
+    env: Arc<dyn ExecutionEnv>,
 }
 
 impl ReadTool {
-    pub fn new(root: WorkspaceRoot) -> Self {
-        Self { root }
+    pub fn new(root: WorkspaceRoot, env: Arc<dyn ExecutionEnv>) -> Self {
+        Self { root, env }
     }
 }
 
@@ -66,11 +70,11 @@ impl Tool for ReadTool {
         let args: Args = serde_json::from_value(invocation.input.clone())
             .map_err(|e| ToolError::InvalidArg(e.to_string()))?;
         let path = self.root.resolve(&args.path).map_err(runtime_err)?;
-        let bytes = tokio::fs::read(&path).await.map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
+        let bytes = self.env.read_file(&path).await.map_err(|e| {
+            if is_not_found(&e) {
                 runtime_err(ToolError::NotFound(args.path.clone()))
             } else {
-                runtime_err(ToolError::Io(e))
+                e
             }
         })?;
         let text = String::from_utf8_lossy(&bytes);
@@ -103,6 +107,10 @@ impl Tool for ReadTool {
 
 fn runtime_err(e: ToolError) -> hivecore_runtime_core::RuntimeError {
     e.into()
+}
+
+fn is_not_found(e: &RuntimeError) -> bool {
+    matches!(e, RuntimeError::Other(msg) if msg.contains("No such file"))
 }
 
 #[cfg(test)]

@@ -1,11 +1,19 @@
 //! `grep` — regex search across the workspace. Returns matching lines with
 //! filename + line number. Bounded by `max_matches`.
+//!
+//! All filesystem traversal routes through `ExecutionEnv` (ADR-031), so
+//! sandbox / remote envs work transparently. Hidden directories (`.` prefix,
+//! depth ≥ 1) are skipped to avoid leaking VCS / cache state.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use regex::Regex;
 use hivecore_runtime_core::{
-    AbortSignal, ContentBlock, RuntimeResult, Tool, ToolInvocation, ToolOutcome, UpdateSink,
+    AbortSignal, ContentBlock, ExecutionEnv, RuntimeResult, Tool, ToolInvocation, ToolOutcome,
+    UpdateSink,
 };
+use regex::Regex;
 use serde::Deserialize;
 
 use crate::error::ToolError;
@@ -16,11 +24,12 @@ const DEFAULT_MAX_MATCHES: usize = 200;
 #[derive(Debug, Clone)]
 pub struct GrepTool {
     root: WorkspaceRoot,
+    env: Arc<dyn ExecutionEnv>,
 }
 
 impl GrepTool {
-    pub fn new(root: WorkspaceRoot) -> Self {
-        Self { root }
+    pub fn new(root: WorkspaceRoot, env: Arc<dyn ExecutionEnv>) -> Self {
+        Self { root, env }
     }
 }
 
@@ -75,51 +84,63 @@ impl Tool for GrepTool {
         };
         let max = args.max_matches.unwrap_or(DEFAULT_MAX_MATCHES);
 
-        // Walking the tree is sync; offload to a blocking task to keep the
-        // async runtime responsive on large workspaces.
-        let root = self.root.clone();
-        let search_root = search_root.clone();
-        let task = tokio::task::spawn_blocking(move || {
-            let mut hits = Vec::<String>::new();
-            for entry in walkdir::WalkDir::new(&search_root)
-                .follow_links(false)
-                .into_iter()
-                .filter_entry(|e| !is_hidden(e))
-            {
-                if signal.is_aborted() {
-                    return Err(ToolError::Aborted);
+        let mut hits: Vec<String> = Vec::new();
+        let mut truncated = false;
+        let mut stack: Vec<PathBuf> = vec![search_root.clone()];
+
+        while let Some(dir) = stack.pop() {
+            if signal.is_aborted() {
+                return Err(ToolError::Aborted.into());
+            }
+            if hits.len() >= max {
+                truncated = true;
+                break;
+            }
+            let entries = match self.env.list_dir(&dir).await {
+                Ok(es) => es,
+                Err(_) => continue,
+            };
+            for entry in entries {
+                if hits.len() >= max {
+                    truncated = true;
+                    break;
                 }
-                let entry = match entry {
-                    Ok(e) => e,
+                if is_hidden(&entry) {
+                    continue;
+                }
+                if !entry.starts_with(self.root.path()) {
+                    continue;
+                }
+                let stat = match self.env.stat(&entry).await {
+                    Ok(s) => s,
                     Err(_) => continue,
                 };
-                if !entry.file_type().is_file() {
+                if stat.is_symlink {
                     continue;
                 }
-                let path = entry.path();
-                if !path.starts_with(root.path()) {
+                if stat.is_dir {
+                    stack.push(entry);
                     continue;
                 }
-                let Ok(text) = std::fs::read_to_string(path) else {
+                if !stat.is_file {
                     continue;
+                }
+                let text = match self.env.read_text_file(&entry).await {
+                    Ok(t) => t,
+                    Err(_) => continue,
                 };
+                let rel = entry.strip_prefix(self.root.path()).unwrap_or(&entry);
                 for (lineno, line) in text.lines().enumerate() {
                     if re.is_match(line) {
-                        let rel = path.strip_prefix(root.path()).unwrap_or(path);
                         hits.push(format!("{}:{}:{}", rel.display(), lineno + 1, line));
                         if hits.len() >= max {
-                            return Ok((hits, true));
+                            truncated = true;
+                            break;
                         }
                     }
                 }
             }
-            Ok((hits, false))
-        });
-
-        let (hits, truncated) = task
-            .await
-            .map_err(|e| rt(ToolError::InvalidArg(format!("join error: {e}"))))?
-            .map_err(rt)?;
+        }
 
         let summary = format!(
             "{} match{} ({})",
@@ -140,13 +161,9 @@ impl Tool for GrepTool {
     }
 }
 
-fn is_hidden(entry: &walkdir::DirEntry) -> bool {
-    if entry.depth() == 0 {
-        return false; // never skip the search root itself
-    }
-    entry
-        .file_name()
-        .to_str()
+fn is_hidden(p: &Path) -> bool {
+    p.file_name()
+        .and_then(|s| s.to_str())
         .map(|s| s.starts_with('.'))
         .unwrap_or(false)
 }

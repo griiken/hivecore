@@ -1,0 +1,18 @@
+[package]
+name = "hivecore-execution-env"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+hivecore-runtime-core = { path = "../hivecore-runtime-core" }
+async-trait = "0.1"
+tokio = { version = "1", features = ["fs", "process", "macros", "rt", "sync", "time"] }
+thiserror = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"

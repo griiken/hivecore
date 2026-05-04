@@ -1,7 +1,10 @@
 use std::fs;
 use std::sync::Arc;
 
-use hivecore_runtime_core::{AbortSignal, Tool, ToolCallId, ToolInvocation, UpdateSink};
+use hivecore_execution_env::LocalEnv;
+use hivecore_runtime_core::{
+    AbortSignal, ExecutionEnv, Tool, ToolCallId, ToolInvocation, UpdateSink,
+};
 use tempfile::TempDir;
 
 use super::*;
@@ -14,11 +17,15 @@ fn invoke(name: &str, input: serde_json::Value) -> ToolInvocation {
     }
 }
 
+fn env_for(dir: &TempDir) -> Arc<dyn ExecutionEnv> {
+    Arc::new(LocalEnv::new(dir.path().to_path_buf()))
+}
+
 #[tokio::test]
 async fn reads_full_file() {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("hi.txt"), "alpha\nbeta\ngamma\n").unwrap();
-    let tool = ReadTool::new(WorkspaceRoot::new(dir.path()).unwrap());
+    let tool = ReadTool::new(WorkspaceRoot::new(dir.path()).unwrap(), env_for(&dir));
     let (_h, sig) = AbortSignal::new();
     let out = tool
         .execute(
@@ -40,7 +47,7 @@ async fn reads_full_file() {
 #[tokio::test]
 async fn rejects_path_escape() {
     let dir = TempDir::new().unwrap();
-    let tool = ReadTool::new(WorkspaceRoot::new(dir.path()).unwrap());
+    let tool = ReadTool::new(WorkspaceRoot::new(dir.path()).unwrap(), env_for(&dir));
     let (_h, sig) = AbortSignal::new();
     let err = tool
         .execute(
@@ -57,7 +64,10 @@ async fn rejects_path_escape() {
 async fn slice_with_offset_limit() {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("h.txt"), "1\n2\n3\n4\n5\n").unwrap();
-    let tool: Arc<dyn Tool> = Arc::new(ReadTool::new(WorkspaceRoot::new(dir.path()).unwrap()));
+    let tool: Arc<dyn Tool> = Arc::new(ReadTool::new(
+        WorkspaceRoot::new(dir.path()).unwrap(),
+        env_for(&dir),
+    ));
     let (_h, sig) = AbortSignal::new();
     let out = tool
         .execute(

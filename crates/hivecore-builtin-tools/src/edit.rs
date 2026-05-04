@@ -5,9 +5,12 @@
 //! model to provide enough surrounding context to disambiguate, and rejects
 //! ambiguous edits before any I/O happens.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use hivecore_runtime_core::{
-    AbortSignal, ContentBlock, RuntimeResult, Tool, ToolInvocation, ToolOutcome, UpdateSink,
+    AbortSignal, ContentBlock, ExecutionEnv, RuntimeError, RuntimeResult, Tool, ToolInvocation,
+    ToolOutcome, UpdateSink,
 };
 use serde::Deserialize;
 
@@ -17,11 +20,12 @@ use crate::safety::WorkspaceRoot;
 #[derive(Debug, Clone)]
 pub struct EditTool {
     root: WorkspaceRoot,
+    env: Arc<dyn ExecutionEnv>,
 }
 
 impl EditTool {
-    pub fn new(root: WorkspaceRoot) -> Self {
-        Self { root }
+    pub fn new(root: WorkspaceRoot, env: Arc<dyn ExecutionEnv>) -> Self {
+        Self { root, env }
     }
 }
 
@@ -69,11 +73,11 @@ impl Tool for EditTool {
             return Err(ToolError::InvalidArg("old_string == new_string".into()).into());
         }
         let path = self.root.resolve(&args.path).map_err(rt)?;
-        let original = tokio::fs::read_to_string(&path).await.map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
+        let original = self.env.read_text_file(&path).await.map_err(|e| {
+            if is_not_found(&e) {
                 rt(ToolError::NotFound(args.path.clone()))
             } else {
-                rt(ToolError::Io(e))
+                e
             }
         })?;
 
@@ -90,9 +94,7 @@ impl Tool for EditTool {
             original.replacen(&args.old_string, &args.new_string, 1)
         };
 
-        tokio::fs::write(&path, new_contents.as_bytes())
-            .await
-            .map_err(|e| rt(ToolError::Io(e)))?;
+        self.env.write_file(&path, new_contents.as_bytes()).await?;
 
         Ok(ToolOutcome {
             content: vec![ContentBlock::Text {
@@ -111,6 +113,10 @@ impl Tool for EditTool {
 
 fn rt(e: ToolError) -> hivecore_runtime_core::RuntimeError {
     e.into()
+}
+
+fn is_not_found(e: &RuntimeError) -> bool {
+    matches!(e, RuntimeError::Other(msg) if msg.contains("No such file"))
 }
 
 #[cfg(test)]

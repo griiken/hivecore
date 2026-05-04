@@ -1,8 +1,11 @@
 //! `write_file` — overwrite or create a file with the supplied content.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use hivecore_runtime_core::{
-    AbortSignal, ContentBlock, RuntimeResult, Tool, ToolInvocation, ToolOutcome, UpdateSink,
+    AbortSignal, ContentBlock, ExecutionEnv, RuntimeResult, Tool, ToolInvocation, ToolOutcome,
+    UpdateSink,
 };
 use serde::Deserialize;
 
@@ -12,11 +15,12 @@ use crate::safety::WorkspaceRoot;
 #[derive(Debug, Clone)]
 pub struct WriteTool {
     root: WorkspaceRoot,
+    env: Arc<dyn ExecutionEnv>,
 }
 
 impl WriteTool {
-    pub fn new(root: WorkspaceRoot) -> Self {
-        Self { root }
+    pub fn new(root: WorkspaceRoot, env: Arc<dyn ExecutionEnv>) -> Self {
+        Self { root, env }
     }
 }
 
@@ -56,15 +60,8 @@ impl Tool for WriteTool {
         let args: Args = serde_json::from_value(invocation.input.clone())
             .map_err(|e| ToolError::InvalidArg(e.to_string()))?;
         let path = self.root.resolve(&args.path).map_err(rt)?;
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| rt(ToolError::Io(e)))?;
-        }
         let bytes = args.content.len();
-        tokio::fs::write(&path, &args.content)
-            .await
-            .map_err(|e| rt(ToolError::Io(e)))?;
+        self.env.write_file(&path, args.content.as_bytes()).await?;
 
         Ok(ToolOutcome {
             content: vec![ContentBlock::Text {

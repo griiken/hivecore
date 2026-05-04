@@ -1308,6 +1308,7 @@ dependencies = [
  "hivecore-agent-loop",
  "hivecore-builtin-tools",
  "hivecore-config",
+ "hivecore-execution-env",
  "hivecore-openai-adapter",
  "hivecore-persistence",
  "hivecore-runtime-core",
@@ -1399,6 +1400,7 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "hivecore-agent-loop",
+ "hivecore-execution-env",
  "hivecore-openai-adapter",
  "hivecore-runtime-core",
  "regex",
@@ -1408,7 +1410,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
- "walkdir",
 ]
 
 [[package]]
@@ -1426,6 +1427,7 @@ dependencies = [
  "hivecore-browser-runtime",
  "hivecore-builtin-tools",
  "hivecore-compaction",
+ "hivecore-execution-env",
  "hivecore-mcp-client",
  "hivecore-openai-adapter",
  "hivecore-persistence",
@@ -1464,6 +1466,17 @@ dependencies = [
  "thiserror 1.0.69",
  "toml",
  "tracing",
+]
+
+[[package]]
+name = "hivecore-execution-env"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "hivecore-runtime-core",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]
@@ -1527,6 +1540,7 @@ dependencies = [
  "chrono",
  "hivecore-agent-loop",
  "hivecore-builtin-tools",
+ "hivecore-execution-env",
  "hivecore-openai-adapter",
  "hivecore-runtime-core",
  "libc",

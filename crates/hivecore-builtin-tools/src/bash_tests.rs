@@ -1,4 +1,7 @@
-use hivecore_runtime_core::{AbortSignal, ToolCallId, ToolInvocation, UpdateSink};
+use std::sync::Arc;
+
+use hivecore_execution_env::LocalEnv;
+use hivecore_runtime_core::{AbortSignal, ExecutionEnv, ToolCallId, ToolInvocation, UpdateSink};
 use tempfile::TempDir;
 
 use super::*;
@@ -11,10 +14,14 @@ fn invoke(input: serde_json::Value) -> ToolInvocation {
     }
 }
 
+fn env_for(dir: &TempDir) -> Arc<dyn ExecutionEnv> {
+    Arc::new(LocalEnv::new(dir.path().to_path_buf()))
+}
+
 #[tokio::test]
 async fn runs_echo_and_captures_stdout() {
     let dir = TempDir::new().unwrap();
-    let tool = BashTool::new(WorkspaceRoot::new(dir.path()).unwrap());
+    let tool = BashTool::new(WorkspaceRoot::new(dir.path()).unwrap(), env_for(&dir));
     let (_h, sig) = AbortSignal::new();
     let out = tool
         .execute(
@@ -35,7 +42,7 @@ async fn runs_echo_and_captures_stdout() {
 #[tokio::test]
 async fn nonzero_exit_marks_is_error() {
     let dir = TempDir::new().unwrap();
-    let tool = BashTool::new(WorkspaceRoot::new(dir.path()).unwrap());
+    let tool = BashTool::new(WorkspaceRoot::new(dir.path()).unwrap(), env_for(&dir));
     let (_h, sig) = AbortSignal::new();
     let out = tool
         .execute(
@@ -53,7 +60,7 @@ async fn nonzero_exit_marks_is_error() {
 #[tokio::test]
 async fn timeout_kills_long_running_command() {
     let dir = TempDir::new().unwrap();
-    let tool = BashTool::new(WorkspaceRoot::new(dir.path()).unwrap());
+    let tool = BashTool::new(WorkspaceRoot::new(dir.path()).unwrap(), env_for(&dir));
     let (_h, sig) = AbortSignal::new();
     let err = tool
         .execute(

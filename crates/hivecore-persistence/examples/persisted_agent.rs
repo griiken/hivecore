@@ -8,10 +8,12 @@ use std::sync::Arc;
 
 use hivecore_agent_loop::{driver::user_text, AgentLoop, ToolRegistry};
 use hivecore_builtin_tools::{default_set, WorkspaceRoot};
+use hivecore_execution_env::LocalEnv;
 use hivecore_openai_adapter::{OpenAiAdapter, OpenAiClient, OpenAiConfig};
 use hivecore_persistence::{AuditWriter, SessionHeader, SessionReader, SessionWriter, TenantId};
 use hivecore_runtime_core::{
-    AbortSignal, AgentMessage, ContentBlock, EventSink, FanOutSink, ModelAdapter, SessionId,
+    AbortSignal, AgentMessage, ContentBlock, EventSink, ExecutionEnv, FanOutSink, ModelAdapter,
+    SessionId,
 };
 use tempfile::TempDir;
 
@@ -44,7 +46,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sink: Arc<dyn EventSink> = Arc::new(FanOutSink::new(vec![session_writer, audit_writer]));
 
     let root = WorkspaceRoot::new(workspace.path())?;
-    let tools = ToolRegistry::new(default_set(root));
+    let env: Arc<dyn ExecutionEnv> = Arc::new(LocalEnv::new(root.path().to_path_buf()));
+    let tools = ToolRegistry::new(default_set(root, env));
 
     let client = OpenAiClient::new(OpenAiConfig::new(api_key))?;
     let adapter: Arc<dyn ModelAdapter> = Arc::new(OpenAiAdapter::new(client));

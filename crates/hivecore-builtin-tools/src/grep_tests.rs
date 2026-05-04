@@ -1,7 +1,14 @@
-use hivecore_runtime_core::{AbortSignal, ToolCallId, ToolInvocation, UpdateSink};
+use std::sync::Arc;
+
+use hivecore_execution_env::LocalEnv;
+use hivecore_runtime_core::{AbortSignal, ExecutionEnv, ToolCallId, ToolInvocation, UpdateSink};
 use tempfile::TempDir;
 
 use super::*;
+
+fn env_for(dir: &TempDir) -> Arc<dyn ExecutionEnv> {
+    Arc::new(LocalEnv::new(dir.path().to_path_buf()))
+}
 
 #[tokio::test]
 async fn finds_pattern_across_files() {
@@ -11,7 +18,7 @@ async fn finds_pattern_across_files() {
     std::fs::create_dir(dir.path().join("sub")).unwrap();
     std::fs::write(dir.path().join("sub/c.txt"), "another foo\n").unwrap();
 
-    let tool = GrepTool::new(WorkspaceRoot::new(dir.path()).unwrap());
+    let tool = GrepTool::new(WorkspaceRoot::new(dir.path()).unwrap(), env_for(&dir));
     let (_h, sig) = AbortSignal::new();
     let out = tool
         .execute(
@@ -34,7 +41,7 @@ async fn finds_pattern_across_files() {
 async fn case_insensitive_flag_works() {
     let dir = TempDir::new().unwrap();
     std::fs::write(dir.path().join("a.txt"), "FOO\nfoo\n").unwrap();
-    let tool = GrepTool::new(WorkspaceRoot::new(dir.path()).unwrap());
+    let tool = GrepTool::new(WorkspaceRoot::new(dir.path()).unwrap(), env_for(&dir));
     let (_h, sig) = AbortSignal::new();
     let out = tool
         .execute(
@@ -58,7 +65,7 @@ async fn skips_hidden_dirs() {
     std::fs::create_dir(dir.path().join(".git")).unwrap();
     std::fs::write(dir.path().join(".git/HEAD"), "secret\n").unwrap();
     std::fs::write(dir.path().join("visible.txt"), "secret\n").unwrap();
-    let tool = GrepTool::new(WorkspaceRoot::new(dir.path()).unwrap());
+    let tool = GrepTool::new(WorkspaceRoot::new(dir.path()).unwrap(), env_for(&dir));
     let (_h, sig) = AbortSignal::new();
     let out = tool
         .execute(

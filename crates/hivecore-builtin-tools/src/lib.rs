@@ -10,7 +10,9 @@
 //!
 //! All tools are workspace-rooted: paths must resolve under `WorkspaceRoot`
 //! after canonicalisation. Escapes (`..`, symlinks crossing the boundary,
-//! absolute paths outside root) are rejected before any I/O happens.
+//! absolute paths outside root) are rejected before any I/O happens. All
+//! filesystem and process I/O routes through `ExecutionEnv` (ADR-031), so
+//! sandbox / remote providers drop in without touching tool code.
 
 #![deny(missing_debug_implementations)]
 #![warn(rust_2018_idioms, unreachable_pub)]
@@ -25,7 +27,7 @@ pub mod write;
 
 use std::sync::Arc;
 
-use hivecore_runtime_core::Tool;
+use hivecore_runtime_core::{ExecutionEnv, Tool};
 
 pub use bash::BashTool;
 pub use edit::EditTool;
@@ -35,13 +37,16 @@ pub use read::ReadTool;
 pub use safety::WorkspaceRoot;
 pub use write::WriteTool;
 
-/// Returns the canonical builtin set bound to a workspace root.
-pub fn default_set(root: WorkspaceRoot) -> Vec<Arc<dyn Tool>> {
+/// Returns the canonical builtin set bound to a workspace root and an
+/// execution env. Pass the same `Arc::clone` of `env` to every tool —
+/// future sandbox providers may keep per-instance state (open SSH session,
+/// leased VM handle, MutationObserver counter, etc.).
+pub fn default_set(root: WorkspaceRoot, env: Arc<dyn ExecutionEnv>) -> Vec<Arc<dyn Tool>> {
     vec![
-        Arc::new(ReadTool::new(root.clone())),
-        Arc::new(WriteTool::new(root.clone())),
-        Arc::new(EditTool::new(root.clone())),
-        Arc::new(BashTool::new(root.clone())),
-        Arc::new(GrepTool::new(root)),
+        Arc::new(ReadTool::new(root.clone(), Arc::clone(&env))),
+        Arc::new(WriteTool::new(root.clone(), Arc::clone(&env))),
+        Arc::new(EditTool::new(root.clone(), Arc::clone(&env))),
+        Arc::new(BashTool::new(root.clone(), Arc::clone(&env))),
+        Arc::new(GrepTool::new(root, env)),
     ]
 }

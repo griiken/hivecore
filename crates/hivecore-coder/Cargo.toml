@@ -16,6 +16,7 @@ hivecore-runtime-core = { path = "../hivecore-runtime-core" }
 hivecore-agent-loop = { path = "../hivecore-agent-loop" }
 hivecore-openai-adapter = { path = "../hivecore-openai-adapter" }
 hivecore-builtin-tools = { path = "../hivecore-builtin-tools" }
+hivecore-execution-env = { path = "../hivecore-execution-env" }
 hivecore-persistence = { path = "../hivecore-persistence" }
 hivecore-compaction = { path = "../hivecore-compaction" }
 hivecore-browser-core = { path = "../hivecore-browser-core" }

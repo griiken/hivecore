@@ -14,6 +14,7 @@ pub mod abort;
 pub mod approval;
 pub mod error;
 pub mod event;
+pub mod execution_env;
 pub mod hook;
 pub mod ids;
 pub mod lifecycle;
@@ -31,6 +32,7 @@ pub use approval::{
 };
 pub use error::{RuntimeError, RuntimeResult};
 pub use event::AgentEvent;
+pub use execution_env::{ExecOpts, ExecOutput, ExecutionEnv, FileStat, RemoveOpts};
 pub use hook::{HookOutcome, PostHookOutcome, ToolHook, ToolHookContext, ToolPostContext};
 pub use ids::{MessageId, SessionId, ToolCallId, TurnId};
 pub use lifecycle::{LifecycleEvent, LifecycleHook, LifecycleOutcome};

@@ -12,8 +12,9 @@ use std::sync::Arc as StdArc;
 use hivecore_agent_loop::{driver::user_text, AgentLoop, ToolRegistry};
 use hivecore_builtin_tools::{default_set, WorkspaceRoot};
 use hivecore_config::{Agent, AgentLoader, AgentRegistry};
+use hivecore_execution_env::LocalEnv;
 use hivecore_openai_adapter::{OpenAiAdapter, OpenAiClient, OpenAiConfig};
-use hivecore_runtime_core::{AbortSignal, ModelAdapter, Tool, ToolHook};
+use hivecore_runtime_core::{AbortSignal, ExecutionEnv, ModelAdapter, Tool, ToolHook};
 use hivecore_skills::{render::RenderCtx, SkillLoader, SkillRegistry, SubAgentRouter};
 use tokio::sync::Mutex;
 
@@ -116,7 +117,8 @@ impl ServerState {
 
         let root = WorkspaceRoot::new(&self.config.workspace)
             .map_err(|e| anyhow::anyhow!("invalid workspace: {e}"))?;
-        let all_tools = default_set(root);
+        let env: Arc<dyn ExecutionEnv> = Arc::new(LocalEnv::new(root.path().to_path_buf()));
+        let all_tools = default_set(root, env);
         let mut filtered = filter_tools(&all_tools, agent);
 
         // Append skill-derived tools. Skills bypass the agent's tool
@@ -197,7 +199,8 @@ impl SubAgentRouter for AgentRouter {
         })?;
         let root = WorkspaceRoot::new(&self.workspace)
             .map_err(|e| RuntimeError::ToolFailed(format!("workspace: {e}")))?;
-        let all_tools = default_set(root);
+        let env: Arc<dyn ExecutionEnv> = Arc::new(LocalEnv::new(root.path().to_path_buf()));
+        let all_tools = default_set(root, env);
         let filtered = filter_tools(&all_tools, agent);
         let tools = ToolRegistry::new(filtered);
 

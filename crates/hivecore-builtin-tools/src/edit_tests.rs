@@ -1,4 +1,7 @@
-use hivecore_runtime_core::{AbortSignal, ToolCallId, ToolInvocation, UpdateSink};
+use std::sync::Arc;
+
+use hivecore_execution_env::LocalEnv;
+use hivecore_runtime_core::{AbortSignal, ExecutionEnv, ToolCallId, ToolInvocation, UpdateSink};
 use tempfile::TempDir;
 
 use super::*;
@@ -6,7 +9,8 @@ use super::*;
 fn setup(content: &str) -> (TempDir, EditTool) {
     let dir = TempDir::new().unwrap();
     std::fs::write(dir.path().join("f.txt"), content).unwrap();
-    let tool = EditTool::new(WorkspaceRoot::new(dir.path()).unwrap());
+    let env: Arc<dyn ExecutionEnv> = Arc::new(LocalEnv::new(dir.path().to_path_buf()));
+    let tool = EditTool::new(WorkspaceRoot::new(dir.path()).unwrap(), env);
     (dir, tool)
 }
 

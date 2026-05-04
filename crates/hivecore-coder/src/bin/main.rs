@@ -20,15 +20,16 @@ use hivecore_browser_runtime::{ChromeConfig, ChromeProvider};
 use hivecore_builtin_tools::{default_set, WorkspaceRoot};
 use hivecore_coder::{CliPrompter, ClockTool, StderrSink, TurnBudgetHook};
 use hivecore_compaction::{CompactionConfig, SummarizingTransform, DEFAULT_COMPACTION_CONFIG};
+use hivecore_execution_env::LocalEnv;
 use hivecore_mcp_client::{default_meta_tools, McpClient, McpRiskAugmenter, McpUserConfig};
 use hivecore_openai_adapter::{OpenAiAdapter, OpenAiClient, OpenAiConfig};
 use hivecore_persistence::{
     acquire_lock, append_entry, find_latest_by_cwd, resolve_handle, session_path, tenant_dir,
-    SessionHeader, SessionIndexEntry, SessionReader, SessionWriter,
+    AuditWriter, SessionHeader, SessionIndexEntry, SessionReader, SessionWriter, TenantId,
 };
 use hivecore_runtime_core::{
-    AbortSignal, AgentMessage, Approval, ContentBlock, ContextTransform, EventSink, FanOutSink,
-    LifecycleHook, ModelAdapter, RiskAugmenter, SessionId, Tool,
+    AbortSignal, AgentMessage, Approval, ContentBlock, ContextTransform, EventSink, ExecutionEnv,
+    FanOutSink, LifecycleHook, ModelAdapter, RiskAugmenter, SessionId, Tool,
 };
 use hivecore_tool_policy::{apply_exclude, ApprovalHook, ApprovalPolicy, ToolNameMatcher};
 
@@ -168,7 +169,8 @@ async fn main() -> anyhow::Result<()> {
     let model: Arc<dyn ModelAdapter> = Arc::new(OpenAiAdapter::new(client));
 
     let root = WorkspaceRoot::new(&workspace)?;
-    let mut tools: Vec<Arc<dyn Tool>> = default_set(root);
+    let env: Arc<dyn ExecutionEnv> = Arc::new(LocalEnv::new(root.path().to_path_buf()));
+    let mut tools: Vec<Arc<dyn Tool>> = default_set(root, env);
     tools.push(Arc::new(ClockTool));
 
     // ADR-027 — opt-in MCP integration. Reads `~/.hivecore/mcp.toml` (user)
@@ -239,9 +241,18 @@ async fn main() -> anyhow::Result<()> {
     };
     let registry = ToolRegistry::new(tools);
 
+    // ADR-019 audit log — JSONL beside the session file (`<id>.audit.jsonl`).
+    // Captures orchestrator/tool/approval events; session log keeps the model
+    // transcript. ApprovalHook also gets this writer below so approval
+    // decisions are recorded under `AuditClass::Approval`.
+    let audit_path = path.with_extension("audit.jsonl");
+    let audit_writer =
+        Arc::new(AuditWriter::create(&audit_path, session_id, TenantId::single_tenant()).await?);
+
     let sink: Arc<dyn EventSink> = Arc::new(FanOutSink::new(vec![
         Arc::new(StderrSink) as Arc<dyn EventSink>,
         Arc::new(writer) as Arc<dyn EventSink>,
+        audit_writer.clone() as Arc<dyn EventSink>,
     ]));
     let budget: Arc<dyn LifecycleHook> = Arc::new(TurnBudgetHook::new(max_calls));
 
@@ -285,7 +296,8 @@ async fn main() -> anyhow::Result<()> {
             ApprovalPolicy::OnRequest,
             Arc::new(ToolNameMatcher::coder_defaults()),
             prompter,
-        );
+        )
+        .with_audit(audit_writer.clone() as Arc<dyn EventSink>);
         if let Some(aug) = mcp_risk_augmenter.clone() {
             hook = hook.with_augmenter(aug);
         }

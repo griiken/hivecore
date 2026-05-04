@@ -7,8 +7,9 @@ use std::sync::Arc;
 
 use hivecore_agent_loop::{driver::user_text, AgentLoop, ToolRegistry, VecSink};
 use hivecore_builtin_tools::{default_set, WorkspaceRoot};
+use hivecore_execution_env::LocalEnv;
 use hivecore_openai_adapter::{OpenAiAdapter, OpenAiClient, OpenAiConfig};
-use hivecore_runtime_core::{AbortSignal, AgentEvent, ContentBlock, ModelAdapter};
+use hivecore_runtime_core::{AbortSignal, AgentEvent, ContentBlock, ExecutionEnv, ModelAdapter};
 use tempfile::TempDir;
 
 #[tokio::main]
@@ -25,7 +26,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("workspace: {}", dir.path().display());
 
     let root = WorkspaceRoot::new(dir.path())?;
-    let tools = ToolRegistry::new(default_set(root));
+    let env: Arc<dyn ExecutionEnv> = Arc::new(LocalEnv::new(root.path().to_path_buf()));
+    let tools = ToolRegistry::new(default_set(root, env));
 
     let client = OpenAiClient::new(OpenAiConfig::new(api_key))?;
     let adapter: Arc<dyn ModelAdapter> = Arc::new(OpenAiAdapter::new(client));

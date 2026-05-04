@@ -5,8 +5,8 @@
 use std::env;
 use std::sync::Arc;
 
-use hivecore_agent_loop::{driver::user_text, AgentLoop, ToolRegistry, VecSink};
 use async_trait::async_trait;
+use hivecore_agent_loop::{driver::user_text, AgentLoop, ToolRegistry, VecSink};
 use hivecore_openai_adapter::{OpenAiAdapter, OpenAiClient, OpenAiConfig};
 use hivecore_runtime_core::{
     AbortSignal, AgentEvent, ContentBlock, ModelAdapter, RuntimeResult, Tool, ToolInvocation,

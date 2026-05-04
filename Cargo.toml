@@ -28,6 +28,9 @@ members = [
     # ADR-029 tool-call policy — Layer-3 plane: HITL approval (ApprovalHook),
     # risk-hint augmentation, static exclude, future inspector pipeline.
     "crates/hivecore-tool-policy",
+    # ADR-031 default `ExecutionEnv` impl — `LocalEnv` over `tokio::fs` +
+    # `tokio::process`. Future sandbox providers ship sibling crates.
+    "crates/hivecore-execution-env",
 ]
 exclude = [
     # The example WASM Component is its own workspace — built with a

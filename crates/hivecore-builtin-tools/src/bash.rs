@@ -1,19 +1,19 @@
 //! `bash` — execute a shell command in the workspace root.
 //!
-//! Default timeout: 120s. Honours `AbortSignal` via tokio kill. Captures
-//! stdout + stderr separately. **No sandbox** in v0.1 — Layer 3 wraps this
-//! tool with a hook that consults a Codex-style `execpolicy`.
+//! Default timeout: 120s. Honours `AbortSignal`. Captures stdout + stderr.
+//! All process I/O routes through `ExecutionEnv` (ADR-031), so future
+//! sandbox providers (Firecracker, Docker, remote) drop in without touching
+//! this tool.
 
-use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use hivecore_runtime_core::{
-    AbortSignal, ContentBlock, RuntimeResult, Tool, ToolInvocation, ToolOutcome, UpdateSink,
+    AbortSignal, ContentBlock, ExecOpts, ExecutionEnv, RuntimeResult, Tool, ToolInvocation,
+    ToolOutcome, UpdateSink,
 };
 use serde::Deserialize;
-use tokio::process::Command;
-use tokio::time::timeout;
 
 use crate::error::ToolError;
 use crate::safety::WorkspaceRoot;
@@ -24,11 +24,12 @@ const MAX_OUTPUT_BYTES: usize = 32 * 1024;
 #[derive(Debug, Clone)]
 pub struct BashTool {
     root: WorkspaceRoot,
+    env: Arc<dyn ExecutionEnv>,
 }
 
 impl BashTool {
-    pub fn new(root: WorkspaceRoot) -> Self {
-        Self { root }
+    pub fn new(root: WorkspaceRoot, env: Arc<dyn ExecutionEnv>) -> Self {
+        Self { root, env }
     }
 }
 
@@ -75,24 +76,26 @@ impl Tool for BashTool {
             None => self.root.path().to_path_buf(),
         };
 
-        let mut cmd = Command::new("bash");
-        cmd.arg("-lc")
-            .arg(&args.command)
-            .current_dir(&cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        let child = cmd.spawn().map_err(|e| rt(ToolError::Io(e)))?;
-        on_update.send(serde_json::json!({"phase":"started","cwd":cwd.display().to_string()}));
         if signal.is_aborted() {
             return Err(ToolError::Aborted.into());
         }
+        on_update.send(serde_json::json!({"phase":"started","cwd":cwd.display().to_string()}));
 
-        let output = match timeout(dur, child.wait_with_output()).await {
-            Ok(Ok(o)) => o,
-            Ok(Err(e)) => return Err(rt(ToolError::Io(e))),
-            Err(_) => return Err(rt(ToolError::Timeout(dur.as_millis() as u64))),
+        let opts = ExecOpts {
+            cwd: Some(cwd.clone()),
+            timeout: Some(dur),
+            signal: Some(signal.clone()),
+            ..Default::default()
+        };
+        let output = match self.env.exec(&args.command, opts).await {
+            Ok(o) => o,
+            Err(hivecore_runtime_core::RuntimeError::Aborted) => {
+                return Err(ToolError::Aborted.into());
+            }
+            Err(hivecore_runtime_core::RuntimeError::Other(msg)) if msg.contains("timeout") => {
+                return Err(rt(ToolError::Timeout(dur.as_millis() as u64)));
+            }
+            Err(e) => return Err(e),
         };
 
         let mut combined = String::new();
@@ -114,8 +117,8 @@ impl Tool for BashTool {
             combined.push_str("\n…[truncated]");
         }
 
-        let exit = output.status.code().unwrap_or(-1);
-        let is_error = !output.status.success();
+        let exit = output.exit_code;
+        let is_error = exit != 0;
 
         Ok(ToolOutcome {
             content: vec![ContentBlock::Text { text: combined }],

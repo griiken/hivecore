@@ -22,7 +22,7 @@ pub mod steering;
 
 pub use driver::{AgentLoop, RunOutcome};
 pub use error::LoopError;
-pub use registry::ToolRegistry;
 pub use hivecore_runtime_core::{EventSink, FanOutSink, NoopSink, VecSink};
+pub use registry::ToolRegistry;
 pub use spawn::{ClosureSpec, SpawnAgentTool, SubAgentSpec};
 pub use steering::{NoopSteering, SteeringSource};

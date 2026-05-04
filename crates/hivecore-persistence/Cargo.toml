@@ -27,3 +27,4 @@ tempfile = "3"
 hivecore-agent-loop = { path = "../hivecore-agent-loop" }
 hivecore-openai-adapter = { path = "../hivecore-openai-adapter" }
 hivecore-builtin-tools = { path = "../hivecore-builtin-tools" }
+hivecore-execution-env = { path = "../hivecore-execution-env" }
