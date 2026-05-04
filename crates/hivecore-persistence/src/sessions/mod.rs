@@ -15,6 +15,7 @@
 pub mod index;
 pub mod lock;
 mod reader;
+pub mod store;
 mod writer;
 
 pub use index::{
@@ -23,6 +24,7 @@ pub use index::{
 };
 pub use lock::{acquire as acquire_lock, LockError, SessionLock};
 pub use reader::SessionReader;
+pub use store::{SessionEntryKind, SessionMetadata, SessionStore};
 pub use writer::SessionWriter;
 
 use std::path::{Path, PathBuf};

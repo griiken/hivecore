@@ -18,8 +18,9 @@ use hivecore_runtime_core::AgentEvent;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 
-use crate::error::Result;
-use crate::sessions::{EntryId, SessionEntry, SessionHeader};
+use crate::error::{PersistenceError, Result};
+use crate::sessions::store::{SessionEntryKind, SessionMetadata, SessionStore};
+use crate::sessions::{EntryId, SessionEntry, SessionHeader, SessionReader};
 
 /// Writes session JSONL. Cheap to clone; the underlying file handle and
 /// in-memory cursor (`leaf` + id-set) are shared via `Arc<Mutex<...>>`
@@ -253,4 +254,132 @@ async fn write_line(f: &mut tokio::fs::File, entry: &SessionEntry) -> Result<()>
     f.write_all(line.as_bytes()).await?;
     f.flush().await?;
     Ok(())
+}
+
+/// ADR-032c — `SessionStore` impl. Read methods re-read the JSONL file
+/// on each call. Sessions stay small for v0.1; lazy in-memory caching
+/// defers to a future commit if a real workload demands it.
+#[async_trait]
+impl SessionStore for SessionWriter {
+    async fn metadata(&self) -> std::result::Result<SessionMetadata, PersistenceError> {
+        let snap = SessionReader::open(self.path()).await?;
+        let h = snap.header;
+        Ok(SessionMetadata {
+            session_id: h.session_id,
+            created_at: h.created_at,
+            model: h.model,
+            system_prompt: h.system_prompt,
+            parent_session: h.parent_session,
+            format_version: h.format_version,
+            path: self.path().to_path_buf(),
+        })
+    }
+
+    async fn leaf_id(&self) -> std::result::Result<Option<EntryId>, PersistenceError> {
+        Ok(self.current_leaf().await)
+    }
+
+    async fn set_leaf_id(
+        &self,
+        target: Option<EntryId>,
+    ) -> std::result::Result<EntryId, PersistenceError> {
+        SessionWriter::set_leaf_id(self, target).await
+    }
+
+    async fn append_entry(&self, entry: SessionEntry) -> std::result::Result<(), PersistenceError> {
+        // Trait-level append accepts pre-built entries — caller is
+        // responsible for id / parent_id / recorded_at / seq. Used by
+        // future store-aware compaction code (ADR-032d) that produces
+        // first-class `Compaction` / `BranchSummary` entries; v0.1
+        // builtin paths route through the typed `append_message` /
+        // `append_event` / `set_leaf_id` accessors instead.
+        let mut f = self.file.lock().await;
+        let mut s = self.state.lock().await;
+        if let Some(id) = entry.id() {
+            s.seen_ids.insert(id.clone());
+        }
+        write_line(&mut f, &entry).await?;
+        if let SessionEntry::LeafChange { to, .. } = &entry {
+            s.leaf = to.clone();
+        }
+        Ok(())
+    }
+
+    async fn get_entry(
+        &self,
+        id: &EntryId,
+    ) -> std::result::Result<Option<SessionEntry>, PersistenceError> {
+        let snap = SessionReader::open(self.path()).await?;
+        Ok(snap.entries.into_iter().find(|e| e.id() == Some(id)))
+    }
+
+    async fn find_entries_of_kind(
+        &self,
+        kind: SessionEntryKind,
+    ) -> std::result::Result<Vec<SessionEntry>, PersistenceError> {
+        let snap = SessionReader::open(self.path()).await?;
+        Ok(snap
+            .entries
+            .into_iter()
+            .filter(|e| kind.matches(e))
+            .collect())
+    }
+
+    async fn path_to_root(
+        &self,
+        leaf: Option<EntryId>,
+    ) -> std::result::Result<Vec<SessionEntry>, PersistenceError> {
+        let snap = SessionReader::open(self.path()).await?;
+        let leaf = leaf.or_else(|| snap.leaf_id());
+        let by_id: std::collections::HashMap<&EntryId, &SessionEntry> = snap
+            .entries
+            .iter()
+            .filter_map(|e| e.id().map(|id| (id, e)))
+            .collect();
+        let mut chain: Vec<SessionEntry> = Vec::new();
+        let mut cursor = leaf;
+        let mut guard = 0usize;
+        while let Some(id) = cursor.take() {
+            guard += 1;
+            if guard > snap.entries.len() + 8 {
+                break;
+            }
+            let Some(entry) = by_id.get(&id) else {
+                break;
+            };
+            chain.push((*entry).clone());
+            cursor = entry.parent_id().cloned();
+        }
+        chain.reverse();
+        Ok(chain)
+    }
+
+    async fn all_entries(&self) -> std::result::Result<Vec<SessionEntry>, PersistenceError> {
+        let snap = SessionReader::open(self.path()).await?;
+        Ok(snap.entries)
+    }
+
+    async fn children_of(
+        &self,
+        id: &EntryId,
+    ) -> std::result::Result<Vec<EntryId>, PersistenceError> {
+        let snap = SessionReader::open(self.path()).await?;
+        Ok(snap
+            .entries
+            .into_iter()
+            .filter_map(|e| {
+                let parent = e.parent_id()?.clone();
+                let entry_id = e.id()?.clone();
+                if &parent == id {
+                    Some(entry_id)
+                } else {
+                    None
+                }
+            })
+            .collect())
+    }
+
+    fn path(&self) -> Option<&std::path::Path> {
+        Some(self.path.as_path())
+    }
 }

@@ -67,6 +67,73 @@ async fn rejects_file_missing_header() {
     assert!(format!("{err}").contains("missing header") || format!("{err}").contains("decode"));
 }
 
+// -- ADR-032c: SessionStore trait ----------------------------------------
+
+#[tokio::test]
+async fn store_trait_round_trips_via_arc_dyn() {
+    use std::sync::Arc;
+
+    use crate::sessions::store::{SessionEntryKind, SessionStore};
+
+    let dir = TempDir::new().unwrap();
+    let session = SessionId::new();
+    let path = dir.path().join("s.jsonl");
+    let writer = SessionWriter::create(&path, SessionHeader::new(session, "m", "s"))
+        .await
+        .unwrap();
+    writer
+        .emit(AgentEvent::MessageCommitted { message: user("a") })
+        .await;
+    writer
+        .emit(AgentEvent::MessageCommitted {
+            message: assistant("b"),
+        })
+        .await;
+
+    let store: Arc<dyn SessionStore> = Arc::new(writer);
+    let meta = store.metadata().await.unwrap();
+    assert_eq!(meta.session_id, session);
+    assert_eq!(meta.format_version, 2);
+
+    let leaf = store.leaf_id().await.unwrap();
+    assert!(leaf.is_some());
+
+    let path_msgs = store.path_to_root(None).await.unwrap();
+    let msg_count = path_msgs
+        .iter()
+        .filter(|e| matches!(e, SessionEntry::Message { .. }))
+        .count();
+    assert_eq!(msg_count, 2);
+
+    let by_kind = store
+        .find_entries_of_kind(SessionEntryKind::Message)
+        .await
+        .unwrap();
+    assert_eq!(by_kind.len(), 2);
+
+    let leaf_changes = store
+        .find_entries_of_kind(SessionEntryKind::LeafChange)
+        .await
+        .unwrap();
+    assert_eq!(leaf_changes.len(), 2);
+
+    // children_of: the first message has the LeafChange after it as a
+    // child; the LeafChange has the second message as a child.
+    let first_msg_id = match &path_msgs[0] {
+        SessionEntry::Message { id, .. } => id.clone(),
+        _ => unreachable!(),
+    };
+    let kids = store.children_of(&first_msg_id).await.unwrap();
+    assert!(
+        !kids.is_empty(),
+        "first message must have at least one child"
+    );
+
+    // get_entry round-trip.
+    let fetched = store.get_entry(&first_msg_id).await.unwrap();
+    assert!(fetched.is_some());
+}
+
 // -- ADR-032b: fork via set_leaf_id --------------------------------------
 
 #[tokio::test]
