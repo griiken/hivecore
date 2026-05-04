@@ -23,7 +23,7 @@ pub mod role;
 pub mod role_loader;
 pub mod role_registry;
 
-pub use agent::{Agent, ToolMode};
+pub use agent::{Agent, SkillPolicy, ToolMode};
 pub use error::{ConfigError, ValidationError};
 pub use loader::AgentLoader;
 pub use registry::AgentRegistry;

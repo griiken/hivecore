@@ -16,6 +16,7 @@ fn make(id: &str) -> Agent {
             mode: ToolMode::All,
             list: vec![],
         },
+        skills: crate::agent::SkillPolicy::All,
         limits: Limits { max_iterations: 8 },
     }
 }

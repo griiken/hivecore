@@ -121,9 +121,9 @@ impl ServerState {
         let all_tools = default_set(root, env);
         let mut filtered = filter_tools(&all_tools, agent);
 
-        // Append skill-derived tools. Skills bypass the agent's tool
-        // allowlist — opting them in by placing a `*.md` in
-        // `HIVECORE_SKILL_DIR` is the explicit grant.
+        // Append skill-derived tools, gated by the agent's `skills` policy
+        // (default `All` preserves prior "every skill in the dir is exposed"
+        // behavior; allowlist tightens to a named subset).
         let workdir = self.config.workspace.clone();
         let session_id_str = session_id.to_string();
         let router: Arc<dyn SubAgentRouter> = Arc::new(AgentRouter {
@@ -140,7 +140,9 @@ impl ServerState {
             Some(router),
         );
         for st in skill_tools {
-            filtered.push(st);
+            if agent.skills.allows(st.name()) {
+                filtered.push(st);
+            }
         }
         let tools = ToolRegistry::new(filtered);
 

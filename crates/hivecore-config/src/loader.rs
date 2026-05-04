@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::agent::{Agent, Limits, ModelSelection, ToolMode, ToolPolicy};
+use crate::agent::{Agent, Limits, ModelSelection, SkillPolicy, ToolMode, ToolPolicy};
 use crate::error::{ConfigError, ValidationError};
 
 #[derive(Debug, Default, Clone)]
@@ -107,6 +107,7 @@ impl AgentLoader {
             model,
             system_prompt,
             tools,
+            skills: raw.skills.unwrap_or_default(),
             limits: Limits {
                 max_iterations: raw.limits.max_iterations,
             },
@@ -141,6 +142,8 @@ mod raw {
         pub model: Model,
         pub system_prompt: SystemPrompt,
         pub tools: Tools,
+        #[serde(default)]
+        pub skills: Option<SkillPolicy>,
         pub limits: Limits,
     }
 

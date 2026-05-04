@@ -115,6 +115,38 @@ fn load_dir_picks_up_only_toml_files() {
 }
 
 #[test]
+fn defaults_skills_to_all_when_field_omitted() {
+    let d = TempDir::new().unwrap();
+    let p = write(d.path(), "default.toml", VALID_TOML);
+    let agent = AgentLoader::new().load_file(&p).unwrap();
+    assert!(matches!(agent.skills, SkillPolicy::All));
+    assert!(agent.skills.allows("any-skill"));
+}
+
+#[test]
+fn parses_star_skills_as_all() {
+    let d = TempDir::new().unwrap();
+    let body = VALID_TOML.replace("version = \"0.1.0\"", "version = \"0.1.0\"\nskills = \"*\"");
+    let p = write(d.path(), "x.toml", &body);
+    let agent = AgentLoader::new().load_file(&p).unwrap();
+    assert!(matches!(agent.skills, SkillPolicy::All));
+}
+
+#[test]
+fn parses_list_skills_as_allowlist() {
+    let d = TempDir::new().unwrap();
+    let body = VALID_TOML.replace(
+        "version = \"0.1.0\"",
+        "version = \"0.1.0\"\nskills = [\"pdf\", \"review\"]",
+    );
+    let p = write(d.path(), "x.toml", &body);
+    let agent = AgentLoader::new().load_file(&p).unwrap();
+    assert!(agent.skills.allows("pdf"));
+    assert!(agent.skills.allows("review"));
+    assert!(!agent.skills.allows("dangerous"));
+}
+
+#[test]
 fn load_dir_handles_empty_or_missing_dir() {
     let d = TempDir::new().unwrap();
     assert!(AgentLoader::new().load_dir(d.path()).unwrap().is_empty());
