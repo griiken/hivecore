@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use hivecore_runtime_core::{
-    AbortSignal, ContentBlock, RuntimeResult, Tool, ToolInvocation, ToolOutcome, UpdateSink,
+    AbortSignal, ContentBlock, RuntimeResult, Tool, ToolExecutionMode, ToolInvocation, ToolOutcome,
+    UpdateSink,
 };
 use serde::Deserialize;
 
@@ -160,6 +161,12 @@ struct CallArgs {
 impl Tool for McpCallTool {
     fn name(&self) -> &str {
         "mcp_call"
+    }
+
+    fn execution_mode(&self) -> ToolExecutionMode {
+        // ADR-034 v0.1 — conservative; v0.2 will dispatch dynamically per
+        // invocation via `RiskHint.read_only` (ADR-029 A3 RiskAugmenter).
+        ToolExecutionMode::Sequential
     }
 
     fn description(&self) -> &str {

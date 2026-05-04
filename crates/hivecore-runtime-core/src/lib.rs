@@ -40,5 +40,5 @@ pub use message::{AgentMessage, ContentBlock, StopReason};
 pub use model::{ModelAdapter, ModelChunk, ModelRequest, ModelStream, TokenUsage};
 pub use sink::{EventSink, FanOutSink, NoopSink, VecSink};
 pub use state::{AgentState, ThinkingLevel, ToolDescriptor};
-pub use tool::{Tool, ToolInvocation, ToolOutcome, UpdateSink};
+pub use tool::{Tool, ToolExecutionMode, ToolInvocation, ToolOutcome, UpdateSink};
 pub use transform::ContextTransform;

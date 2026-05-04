@@ -23,8 +23,8 @@ use chrono::Utc;
 use hivecore_runtime_core::{
     AbortSignal, AgentEvent, AgentMessage, AgentState, ContentBlock, ContextTransform, HookOutcome,
     LifecycleEvent, LifecycleHook, LifecycleOutcome, MessageId, ModelAdapter, ModelRequest,
-    PostHookOutcome, SessionId, StopReason, ToolHook, ToolHookContext, ToolInvocation, ToolOutcome,
-    ToolPostContext, TurnId, UpdateSink,
+    PostHookOutcome, SessionId, StopReason, ToolExecutionMode, ToolHook, ToolHookContext,
+    ToolInvocation, ToolOutcome, ToolPostContext, TurnId, UpdateSink,
 };
 
 use crate::accumulator::{AssembledTurn, DefaultConsumer, StreamConsumer, ToolCallRequest};
@@ -388,64 +388,127 @@ impl AgentLoop {
         calls: Vec<ToolCallRequest>,
         signal: AbortSignal,
     ) -> Result<bool, LoopError> {
-        // ADR-035: AND-across-batch terminate. Empty batch never terminates;
-        // any single non-`ReplaceAndTerminate` post-hook flips this off.
-        let mut any_call = false;
+        // ADR-034: partition by `Tool::execution_mode()`. Parallel-eligible
+        // calls run concurrently via `futures::future::join_all`; sequential
+        // calls run one-at-a-time AFTER the parallel batch settles. Tools
+        // not present in the registry default to Sequential (safe — model
+        // sees the canonical "tool not found" path through `execute_tool`).
+        // ADR-035: AND-across-batch terminate flag.
+        if calls.is_empty() {
+            return Ok(false);
+        }
+
+        // Phase 1 — classify each call.
+        let mut classified: Vec<(usize, ToolInvocation, ToolExecutionMode)> =
+            Vec::with_capacity(calls.len());
+        for (idx, call) in calls.into_iter().enumerate() {
+            let mode = self
+                .tools
+                .get(&call.name)
+                .map(|t| t.execution_mode())
+                .unwrap_or(ToolExecutionMode::Sequential);
+            classified.push((
+                idx,
+                ToolInvocation {
+                    id: call.id,
+                    name: call.name,
+                    input: call.input,
+                },
+                mode,
+            ));
+        }
+        let total = classified.len();
+        let (parallel, sequential): (Vec<_>, Vec<_>) = classified
+            .into_iter()
+            .partition(|(_, _, m)| *m == ToolExecutionMode::Parallel);
+
+        // Buffer per-source-index so message emission preserves source order.
+        let mut results: Vec<Option<(ToolInvocation, ToolOutcome, bool)>> =
+            (0..total).map(|_| None).collect();
+
+        // Phase 2a — parallel batch. ToolExecEnd events fire in completion
+        // order (see `process_one_call`); tool_result messages are emitted
+        // later in source order on the main thread.
+        if !parallel.is_empty() {
+            // Reborrow as a shared ref so each closure can capture a Copy
+            // of the immutable handle — `process_one_call` only needs
+            // `&self`, and parallel futures must share the same borrow.
+            let this: &Self = self;
+            let futs = parallel.into_iter().map(|(idx, inv, _)| {
+                let sig = signal.clone();
+                async move {
+                    let res = this.process_one_call(turn_id, &inv, sig).await?;
+                    Result::<_, LoopError>::Ok((idx, inv, res))
+                }
+            });
+            let outs = futures::future::join_all(futs).await;
+            for o in outs {
+                let (idx, inv, (outcome, terminate)) = o?;
+                results[idx] = Some((inv, outcome, terminate));
+            }
+        }
+
+        // Phase 2b — sequential batch.
+        for (idx, inv, _) in sequential {
+            let (outcome, terminate) = self.process_one_call(turn_id, &inv, signal.clone()).await?;
+            results[idx] = Some((inv, outcome, terminate));
+        }
+
+        // Phase 3 — emit tool_result messages in source order; AND across
+        // the terminate flags. (ADR-035: empty batch handled via early
+        // return above; here `total > 0` guarantees `any_call`.)
         let mut all_terminate = true;
-        for call in calls {
-            any_call = true;
-            let invocation = ToolInvocation {
-                id: call.id.clone(),
-                name: call.name.clone(),
-                input: call.input.clone(),
-            };
-
-            // Pre-hooks. First non-Pass outcome wins.
-            let pre = self.run_pre_hooks(turn_id, &invocation).await;
-            let outcome = match pre {
-                HookDecision::Pass => {
-                    self.execute_tool(turn_id, &invocation, signal.clone())
-                        .await?
-                }
-                HookDecision::Override(o) => o,
-                HookDecision::FailedContinue(reason) => ToolOutcome::error(reason),
-                HookDecision::FailedAbort(reason) => return Err(LoopError::HookAborted(reason)),
-                HookDecision::ManualAttention(reason) => {
-                    return Err(LoopError::ManualAttention(reason))
-                }
-            };
-
-            // Post-hooks. Last `Replace` / `ReplaceAndTerminate` wins on the
-            // outcome AND the terminate flag.
-            let (final_outcome, terminate) =
-                self.run_post_hooks(turn_id, &invocation, outcome).await;
+        for slot in results.into_iter() {
+            let (inv, outcome, terminate) = slot.expect("each call has a result");
             if !terminate {
                 all_terminate = false;
             }
-
-            self.sink
-                .emit(AgentEvent::ToolExecEnd {
-                    tool_call_id: invocation.id.clone(),
-                    is_error: final_outcome.is_error,
-                    result: final_outcome
-                        .details
-                        .clone()
-                        .unwrap_or(serde_json::Value::Null),
-                })
-                .await;
-
             let tool_msg = AgentMessage::ToolResult {
-                id: MessageId(format!("toolresult-{}", invocation.id.0)),
-                tool_call_id: invocation.id,
-                content: final_outcome.content,
-                is_error: final_outcome.is_error,
+                id: MessageId(format!("toolresult-{}", inv.id.0)),
+                tool_call_id: inv.id,
+                content: outcome.content,
+                is_error: outcome.is_error,
             };
             self.state.messages.push(tool_msg.clone());
             self.sink
                 .emit(AgentEvent::MessageCommitted { message: tool_msg })
                 .await;
         }
-        Ok(any_call && all_terminate)
+        Ok(all_terminate)
+    }
+
+    /// Pre-hook + execute + post-hook for a single tool call. Emits
+    /// `ToolExecEnd` on completion (source-order emission of the
+    /// `tool_result` message + `MessageCommitted` event happens in the
+    /// caller, after the whole batch settles).
+    async fn process_one_call(
+        &self,
+        turn_id: TurnId,
+        invocation: &ToolInvocation,
+        signal: AbortSignal,
+    ) -> Result<(ToolOutcome, bool), LoopError> {
+        let pre = self.run_pre_hooks(turn_id, invocation).await;
+        let outcome = match pre {
+            HookDecision::Pass => self.execute_tool(turn_id, invocation, signal).await?,
+            HookDecision::Override(o) => o,
+            HookDecision::FailedContinue(reason) => ToolOutcome::error(reason),
+            HookDecision::FailedAbort(reason) => return Err(LoopError::HookAborted(reason)),
+            HookDecision::ManualAttention(reason) => {
+                return Err(LoopError::ManualAttention(reason))
+            }
+        };
+        let (final_outcome, terminate) = self.run_post_hooks(turn_id, invocation, outcome).await;
+        self.sink
+            .emit(AgentEvent::ToolExecEnd {
+                tool_call_id: invocation.id.clone(),
+                is_error: final_outcome.is_error,
+                result: final_outcome
+                    .details
+                    .clone()
+                    .unwrap_or(serde_json::Value::Null),
+            })
+            .await;
+        Ok((final_outcome, terminate))
     }
 
     async fn run_pre_hooks(&self, turn_id: TurnId, invocation: &ToolInvocation) -> HookDecision {

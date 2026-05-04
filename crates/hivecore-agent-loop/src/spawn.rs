@@ -22,7 +22,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use hivecore_runtime_core::{
     AbortSignal, AgentMessage, ContentBlock, EventSink, MessageId, ModelAdapter, RuntimeError,
-    RuntimeResult, SessionId, ThinkingLevel, Tool, ToolInvocation, ToolOutcome, UpdateSink,
+    RuntimeResult, SessionId, ThinkingLevel, Tool, ToolExecutionMode, ToolInvocation, ToolOutcome,
+    UpdateSink,
 };
 use serde::Deserialize;
 
@@ -132,6 +133,12 @@ struct SpawnArgs {
 impl Tool for SpawnAgentTool {
     fn name(&self) -> &str {
         "spawn_agent"
+    }
+    fn execution_mode(&self) -> ToolExecutionMode {
+        // ADR-034 — sub-agent spawn shares workspace + writes to its own
+        // transcript file under the parent's session dir. Two concurrent
+        // spawns racing on filesystem layout is a footgun; serialise.
+        ToolExecutionMode::Sequential
     }
     fn description(&self) -> &str {
         &self.description_text

@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use hivecore_runtime_core::{
-    AbortSignal, ContentBlock, ExecutionEnv, RuntimeError, RuntimeResult, Tool, ToolInvocation,
-    ToolOutcome, UpdateSink,
+    AbortSignal, ContentBlock, ExecutionEnv, RuntimeError, RuntimeResult, Tool, ToolExecutionMode,
+    ToolInvocation, ToolOutcome, UpdateSink,
 };
 use serde::Deserialize;
 
@@ -42,6 +42,9 @@ struct Args {
 impl Tool for EditTool {
     fn name(&self) -> &str {
         "edit_file"
+    }
+    fn execution_mode(&self) -> ToolExecutionMode {
+        ToolExecutionMode::Sequential
     }
     fn description(&self) -> &str {
         "Replace exactly one occurrence of `old_string` with `new_string` in `path`. Set `replace_all=true` to replace every occurrence. Fails if `old_string` is missing or — without `replace_all` — occurs more than once."

@@ -8,8 +8,8 @@ use hivecore_runtime_core::{
     AbortSignal, AgentEvent, AgentMessage, AgentState, ContentBlock, ContextTransform, HookOutcome,
     LifecycleEvent, LifecycleHook, LifecycleOutcome, MessageId, ModelAdapter, ModelChunk,
     ModelRequest, ModelStream, PostHookOutcome, RuntimeError, RuntimeResult, StopReason,
-    TokenUsage, Tool, ToolCallId, ToolHook, ToolHookContext, ToolInvocation, ToolOutcome,
-    ToolPostContext, UpdateSink,
+    TokenUsage, Tool, ToolCallId, ToolExecutionMode, ToolHook, ToolHookContext, ToolInvocation,
+    ToolOutcome, ToolPostContext, UpdateSink,
 };
 
 use super::*;
@@ -524,6 +524,260 @@ async fn pre_compact_failed_continue_skips_round() {
     // *the rest of the lifecycle dispatch* for that event. So recorder
     // never sees pre_compact either. Either way, no post_compact.
     assert!(!seen.contains(&"post_compact"));
+}
+
+// -- ADR-034: parallel tool dispatch --------------------------------------
+
+/// Tool that sleeps `delay_ms` then echoes a tag. Used to verify parallel
+/// dispatch genuinely overlaps work.
+#[derive(Debug)]
+struct SleepyTool {
+    name: &'static str,
+    mode: ToolExecutionMode,
+    delay_ms: u64,
+}
+
+#[async_trait]
+impl Tool for SleepyTool {
+    fn name(&self) -> &str {
+        self.name
+    }
+    fn execution_mode(&self) -> ToolExecutionMode {
+        self.mode
+    }
+    fn description(&self) -> &str {
+        "sleep then return"
+    }
+    fn parameters(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object","properties":{}})
+    }
+    async fn execute(
+        &self,
+        _invocation: ToolInvocation,
+        _signal: AbortSignal,
+        _on_update: UpdateSink,
+    ) -> RuntimeResult<ToolOutcome> {
+        tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)).await;
+        Ok(ToolOutcome::ok(vec![ContentBlock::Text {
+            text: self.name.to_string(),
+        }]))
+    }
+}
+
+fn three_parallel_calls_then_text() -> Vec<Vec<ModelChunk>> {
+    vec![
+        vec![
+            ModelChunk::MessageStart { id: mid("m2") },
+            ModelChunk::ContentDelta {
+                id: mid("m2"),
+                delta: ContentBlock::Text { text: "ok".into() },
+            },
+            end_chunk(StopReason::EndTurn),
+        ],
+        vec![
+            ModelChunk::MessageStart { id: mid("m1") },
+            ModelChunk::ContentDelta {
+                id: mid("m1"),
+                delta: ContentBlock::ToolUse {
+                    id: ToolCallId("c-a".into()),
+                    name: "alpha".into(),
+                    input: serde_json::json!({}),
+                },
+            },
+            ModelChunk::ContentDelta {
+                id: mid("m1"),
+                delta: ContentBlock::ToolUse {
+                    id: ToolCallId("c-b".into()),
+                    name: "beta".into(),
+                    input: serde_json::json!({}),
+                },
+            },
+            ModelChunk::ContentDelta {
+                id: mid("m1"),
+                delta: ContentBlock::ToolUse {
+                    id: ToolCallId("c-c".into()),
+                    name: "gamma".into(),
+                    input: serde_json::json!({}),
+                },
+            },
+            ModelChunk::MessageEnd {
+                id: mid("m1"),
+                stop_reason: StopReason::ToolUse,
+                usage: TokenUsage::default(),
+            },
+        ],
+    ]
+}
+
+#[tokio::test]
+async fn parallel_batch_runs_concurrently() {
+    let model = Arc::new(ScriptedModel::new(three_parallel_calls_then_text()));
+    let tools = ToolRegistry::new(vec![
+        Arc::new(SleepyTool {
+            name: "alpha",
+            mode: ToolExecutionMode::Parallel,
+            delay_ms: 80,
+        }) as Arc<dyn Tool>,
+        Arc::new(SleepyTool {
+            name: "beta",
+            mode: ToolExecutionMode::Parallel,
+            delay_ms: 80,
+        }) as Arc<dyn Tool>,
+        Arc::new(SleepyTool {
+            name: "gamma",
+            mode: ToolExecutionMode::Parallel,
+            delay_ms: 80,
+        }) as Arc<dyn Tool>,
+    ]);
+    let mut agent = AgentLoop::builder()
+        .model(model, "scripted-par-1")
+        .tools(tools)
+        .build()
+        .unwrap();
+    let (_h, sig) = AbortSignal::new();
+    let start = std::time::Instant::now();
+    let _ = agent.run(user_text("go"), sig).await.unwrap();
+    let elapsed = start.elapsed();
+    // Sequential would take >= 240ms (3 * 80ms). Parallel should land
+    // closer to the single-tool delay. Use a generous bound that still
+    // distinguishes parallel from sequential.
+    assert!(
+        elapsed < std::time::Duration::from_millis(220),
+        "parallel batch took {elapsed:?}, expected < 220ms"
+    );
+}
+
+#[tokio::test]
+async fn sequential_batch_runs_one_at_a_time() {
+    let model = Arc::new(ScriptedModel::new(three_parallel_calls_then_text()));
+    let tools = ToolRegistry::new(vec![
+        Arc::new(SleepyTool {
+            name: "alpha",
+            mode: ToolExecutionMode::Sequential,
+            delay_ms: 60,
+        }) as Arc<dyn Tool>,
+        Arc::new(SleepyTool {
+            name: "beta",
+            mode: ToolExecutionMode::Sequential,
+            delay_ms: 60,
+        }) as Arc<dyn Tool>,
+        Arc::new(SleepyTool {
+            name: "gamma",
+            mode: ToolExecutionMode::Sequential,
+            delay_ms: 60,
+        }) as Arc<dyn Tool>,
+    ]);
+    let mut agent = AgentLoop::builder()
+        .model(model, "scripted-seq-1")
+        .tools(tools)
+        .build()
+        .unwrap();
+    let (_h, sig) = AbortSignal::new();
+    let start = std::time::Instant::now();
+    let _ = agent.run(user_text("go"), sig).await.unwrap();
+    let elapsed = start.elapsed();
+    // Sequential ⇒ ~3 * 60ms = 180ms minimum.
+    assert!(
+        elapsed >= std::time::Duration::from_millis(170),
+        "sequential batch took {elapsed:?}, expected >= 170ms"
+    );
+}
+
+#[tokio::test]
+async fn tool_result_messages_emit_in_source_order() {
+    // First tool delays longer than the second; with parallel dispatch
+    // its execute returns AFTER the second's. The tool_result messages
+    // must still emit in source order so the model sees a deterministic
+    // log on the next turn.
+    let model = Arc::new(ScriptedModel::new(three_parallel_calls_then_text()));
+    let tools = ToolRegistry::new(vec![
+        Arc::new(SleepyTool {
+            name: "alpha",
+            mode: ToolExecutionMode::Parallel,
+            delay_ms: 100,
+        }) as Arc<dyn Tool>,
+        Arc::new(SleepyTool {
+            name: "beta",
+            mode: ToolExecutionMode::Parallel,
+            delay_ms: 50,
+        }) as Arc<dyn Tool>,
+        Arc::new(SleepyTool {
+            name: "gamma",
+            mode: ToolExecutionMode::Parallel,
+            delay_ms: 10,
+        }) as Arc<dyn Tool>,
+    ]);
+    let sink = Arc::new(VecSink::new());
+    let mut agent = AgentLoop::builder()
+        .model(model, "scripted-order-1")
+        .tools(tools)
+        .sink(sink.clone())
+        .build()
+        .unwrap();
+    let (_h, sig) = AbortSignal::new();
+    agent.run(user_text("go"), sig).await.unwrap();
+
+    let events = sink.snapshot();
+    let tool_result_order: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::MessageCommitted {
+                message: AgentMessage::ToolResult { tool_call_id, .. },
+            } => Some(tool_call_id.0.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tool_result_order, vec!["c-a", "c-b", "c-c"]);
+}
+
+#[tokio::test]
+async fn mixed_modes_still_complete_all_calls() {
+    // alpha = Parallel, beta = Sequential, gamma = Parallel. All must run
+    // and produce tool_result messages in source order.
+    let model = Arc::new(ScriptedModel::new(three_parallel_calls_then_text()));
+    let tools = ToolRegistry::new(vec![
+        Arc::new(SleepyTool {
+            name: "alpha",
+            mode: ToolExecutionMode::Parallel,
+            delay_ms: 20,
+        }) as Arc<dyn Tool>,
+        Arc::new(SleepyTool {
+            name: "beta",
+            mode: ToolExecutionMode::Sequential,
+            delay_ms: 20,
+        }) as Arc<dyn Tool>,
+        Arc::new(SleepyTool {
+            name: "gamma",
+            mode: ToolExecutionMode::Parallel,
+            delay_ms: 20,
+        }) as Arc<dyn Tool>,
+    ]);
+    let sink = Arc::new(VecSink::new());
+    let mut agent = AgentLoop::builder()
+        .model(model, "scripted-mixed-1")
+        .tools(tools)
+        .sink(sink.clone())
+        .build()
+        .unwrap();
+    let (_h, sig) = AbortSignal::new();
+    agent.run(user_text("go"), sig).await.unwrap();
+
+    let events = sink.snapshot();
+    let exec_ends = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::ToolExecEnd { .. }))
+        .count();
+    assert_eq!(exec_ends, 3);
+    let tool_result_ids: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::MessageCommitted {
+                message: AgentMessage::ToolResult { tool_call_id, .. },
+            } => Some(tool_call_id.0.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tool_result_ids, vec!["c-a", "c-b", "c-c"]);
 }
 
 // -- ADR-035: PostHookOutcome::ReplaceAndTerminate -----------------------

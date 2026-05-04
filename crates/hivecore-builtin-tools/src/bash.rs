@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use hivecore_runtime_core::{
-    AbortSignal, ContentBlock, ExecOpts, ExecutionEnv, RuntimeResult, Tool, ToolInvocation,
-    ToolOutcome, UpdateSink,
+    AbortSignal, ContentBlock, ExecOpts, ExecutionEnv, RuntimeResult, Tool, ToolExecutionMode,
+    ToolInvocation, ToolOutcome, UpdateSink,
 };
 use serde::Deserialize;
 
@@ -46,6 +46,11 @@ struct Args {
 impl Tool for BashTool {
     fn name(&self) -> &str {
         "bash"
+    }
+    fn execution_mode(&self) -> ToolExecutionMode {
+        // ADR-034 — shell commands mutate workspace + spawn children;
+        // never run two concurrently in the same batch.
+        ToolExecutionMode::Sequential
     }
     fn description(&self) -> &str {
         "Run a shell command. Returns combined stdout+stderr (truncated at 32 KiB). Default timeout 120s."

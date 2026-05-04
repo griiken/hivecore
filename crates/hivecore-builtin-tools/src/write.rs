@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use hivecore_runtime_core::{
-    AbortSignal, ContentBlock, ExecutionEnv, RuntimeResult, Tool, ToolInvocation, ToolOutcome,
-    UpdateSink,
+    AbortSignal, ContentBlock, ExecutionEnv, RuntimeResult, Tool, ToolExecutionMode,
+    ToolInvocation, ToolOutcome, UpdateSink,
 };
 use serde::Deserialize;
 
@@ -34,6 +34,9 @@ struct Args {
 impl Tool for WriteTool {
     fn name(&self) -> &str {
         "write_file"
+    }
+    fn execution_mode(&self) -> ToolExecutionMode {
+        ToolExecutionMode::Sequential
     }
     fn description(&self) -> &str {
         "Overwrite or create a file in the workspace with the given content."

@@ -14,8 +14,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use hivecore_browser_core::{ActionKind, AssertPredicate, ElementRef, WaitCondition};
 use hivecore_runtime_core::{
-    AbortSignal, ContentBlock, RuntimeError, RuntimeResult, Tool, ToolInvocation, ToolOutcome,
-    UpdateSink,
+    AbortSignal, ContentBlock, RuntimeError, RuntimeResult, Tool, ToolExecutionMode,
+    ToolInvocation, ToolOutcome, UpdateSink,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -60,6 +60,10 @@ enum SessionOp {
 impl Tool for BrowserSessionTool {
     fn name(&self) -> &str {
         "browser_session"
+    }
+    fn execution_mode(&self) -> ToolExecutionMode {
+        // ADR-034 — single shared browser session; concurrent ops would race.
+        ToolExecutionMode::Sequential
     }
     fn description(&self) -> &str {
         "Open / close / list browser sessions for this tenant. Each session is an isolated browser process."
@@ -143,6 +147,10 @@ impl Tool for BrowserNavigateTool {
     fn name(&self) -> &str {
         "browser_navigate"
     }
+    fn execution_mode(&self) -> ToolExecutionMode {
+        // ADR-034 — single shared browser session; concurrent ops would race.
+        ToolExecutionMode::Sequential
+    }
     fn description(&self) -> &str {
         "Navigate the named session's active page to `url`. Returns when navigation completes."
     }
@@ -199,6 +207,10 @@ struct SnapshotInput {
 impl Tool for BrowserSnapshotTool {
     fn name(&self) -> &str {
         "browser_snapshot"
+    }
+    fn execution_mode(&self) -> ToolExecutionMode {
+        // ADR-034 — single shared browser session; concurrent ops would race.
+        ToolExecutionMode::Sequential
     }
     fn description(&self) -> &str {
         "Capture a fresh accessibility-tree snapshot of the named session. Returns versioned element refs (`@v<N>:e<id>`) the agent must use for subsequent actions. Re-snapshot after every navigation or DOM change."
@@ -260,6 +272,10 @@ struct ActInput {
 impl Tool for BrowserActTool {
     fn name(&self) -> &str {
         "browser_act"
+    }
+    fn execution_mode(&self) -> ToolExecutionMode {
+        // ADR-034 — single shared browser session; concurrent ops would race.
+        ToolExecutionMode::Sequential
     }
     fn description(&self) -> &str {
         "Apply an action (click, type, fill, press, hover, set_checked, select, drag, upload, scroll) to a versioned element ref. The ref MUST be from the latest snapshot — otherwise this returns a stale-ref error and you must re-snapshot."
@@ -346,6 +362,10 @@ impl Tool for BrowserWaitTool {
     fn name(&self) -> &str {
         "browser_wait"
     }
+    fn execution_mode(&self) -> ToolExecutionMode {
+        // ADR-034 — single shared browser session; concurrent ops would race.
+        ToolExecutionMode::Sequential
+    }
     fn description(&self) -> &str {
         "Wait for a condition (load, dom_content_loaded, network_idle, selector_visible, ref_visible, url_contains, url_matches, text_visible, text_hidden, delay) up to `timeout_ms`."
     }
@@ -416,6 +436,10 @@ impl Tool for BrowserAssertTool {
     fn name(&self) -> &str {
         "browser_assert"
     }
+    fn execution_mode(&self) -> ToolExecutionMode {
+        // ADR-034 — single shared browser session; concurrent ops would race.
+        ToolExecutionMode::Sequential
+    }
     fn description(&self) -> &str {
         "Run an assertion against the current snapshot. Returns true/false plus evidence."
     }
@@ -476,6 +500,10 @@ struct ScreenshotInput {
 impl Tool for BrowserScreenshotTool {
     fn name(&self) -> &str {
         "browser_screenshot"
+    }
+    fn execution_mode(&self) -> ToolExecutionMode {
+        // ADR-034 — single shared browser session; concurrent ops would race.
+        ToolExecutionMode::Sequential
     }
     fn description(&self) -> &str {
         "Capture a PNG screenshot of the page. Bytes returned in details; primary content reports artifact size only (visual confirmation, not interaction)."

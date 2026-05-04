@@ -46,6 +46,18 @@ impl ToolOutcome {
     }
 }
 
+/// ADR-034 — controls how tool calls from a single assistant message are
+/// dispatched. `Sequential` calls run one-at-a-time, in assistant-message
+/// source order; `Parallel` calls run concurrently via `futures::join_all`.
+/// Tools that mutate workspace state (`bash`, `write_file`, `edit_file`)
+/// override to `Sequential`. Read-only tools (`read_file`, `grep`,
+/// `list_dir`) keep the `Parallel` default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolExecutionMode {
+    Sequential,
+    Parallel,
+}
+
 #[async_trait]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
@@ -59,6 +71,13 @@ pub trait Tool: Send + Sync {
         signal: AbortSignal,
         on_update: UpdateSink,
     ) -> RuntimeResult<ToolOutcome>;
+
+    /// ADR-034 — hint to the agent loop. Default `Parallel`. Override
+    /// `Sequential` for tools that mutate shared state where concurrent
+    /// calls would race.
+    fn execution_mode(&self) -> ToolExecutionMode {
+        ToolExecutionMode::Parallel
+    }
 }
 
 /// Channel for streaming progress updates from a running tool. Cheap to
