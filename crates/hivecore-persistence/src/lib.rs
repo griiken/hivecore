@@ -24,6 +24,6 @@ pub use error::PersistenceError;
 pub use hivecore_runtime_core::EventSink;
 pub use sessions::{
     acquire_lock, append_entry, find_by_id, find_by_name, find_latest_by_cwd, index_path,
-    resolve_handle, session_path, tenant_dir, LockError, SessionEntry, SessionHeader,
+    resolve_handle, session_path, tenant_dir, EntryId, LockError, SessionEntry, SessionHeader,
     SessionIndexEntry, SessionLock, SessionReader, SessionWriter,
 };

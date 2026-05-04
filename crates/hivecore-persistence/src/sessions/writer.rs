@@ -160,6 +160,40 @@ impl SessionWriter {
         Ok(())
     }
 
+    /// ADR-032b — explicit cursor move. Writes a `LeafChange` entry from
+    /// the current leaf to `target` without appending a message. The
+    /// next `append_message` uses `target` as `parent_id`, naturally
+    /// producing a sibling branch when `target` is mid-tree (fork) or a
+    /// rewind point (linear history). The previous branch stays on disk
+    /// — every operation is append-only.
+    ///
+    /// Returns the `EntryId` of the LeafChange entry just written.
+    pub async fn set_leaf_id(&self, target: Option<EntryId>) -> Result<EntryId> {
+        let mut f = self.file.lock().await;
+        let mut s = self.state.lock().await;
+        let from = s.leaf.clone();
+        let leaf_change_id = next_unique_id(&mut s.seen_ids);
+        write_line(
+            &mut f,
+            &SessionEntry::LeafChange {
+                id: leaf_change_id.clone(),
+                parent_id: from.clone(),
+                recorded_at: Utc::now(),
+                from,
+                to: target.clone(),
+            },
+        )
+        .await?;
+        s.leaf = target;
+        Ok(leaf_change_id)
+    }
+
+    /// Current in-memory leaf cursor. Useful for callers that want to
+    /// snapshot the leaf id alongside an append (e.g. UI bookkeeping).
+    pub async fn current_leaf(&self) -> Option<EntryId> {
+        self.state.lock().await.leaf.clone()
+    }
+
     pub async fn append_event(&self, event: AgentEvent) -> Result<()> {
         let mut f = self.file.lock().await;
         let mut s = self.state.lock().await;

@@ -26,7 +26,7 @@ use hivecore_mcp_client::{default_meta_tools, McpClient, McpRiskAugmenter, McpUs
 use hivecore_openai_adapter::{OpenAiAdapter, OpenAiClient, OpenAiConfig};
 use hivecore_persistence::{
     acquire_lock, append_entry, find_latest_by_cwd, resolve_handle, session_path, tenant_dir,
-    AuditWriter, SessionHeader, SessionIndexEntry, SessionReader, SessionWriter, TenantId,
+    AuditWriter, EntryId, SessionHeader, SessionIndexEntry, SessionReader, SessionWriter, TenantId,
 };
 use hivecore_runtime_core::{
     AbortSignal, AgentMessage, Approval, ContentBlock, ContextTransform, EventSink, ExecutionEnv,
@@ -96,6 +96,15 @@ struct Args {
     #[arg(long)]
     role: Option<String>,
 
+    /// ADR-032b — fork the session at a specific entry id. Requires
+    /// `--continue` or `--session`; rewinds the cursor to the named
+    /// entry before appending this prompt, so the next message becomes
+    /// a sibling branch. The original branch stays on disk
+    /// (append-only). Use the 8-char `EntryId` from a previous session
+    /// log inspection.
+    #[arg(long)]
+    fork_from: Option<String>,
+
     /// Override the directory roles are loaded from. Defaults to
     /// `<workspace>/.hivecore/roles/`. Tilde and relative paths resolve
     /// against the current working directory.
@@ -152,20 +161,66 @@ async fn main() -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let writer = if header_existed {
+    // Validate --fork-from semantics before opening the writer: it
+    // requires an existing session.
+    if args.fork_from.is_some() && !header_existed {
+        anyhow::bail!(
+            "--fork-from requires --continue or --session pointing at an existing session"
+        );
+    }
+
+    let (writer, prior_messages) = if header_existed {
         // ADR-032 — re-seed the writer's cursor + id-set from the existing
         // tree so the next `LeafChange.from` correctly points at the last
         // leaf on disk and id-collision guarding stays whole-file-aware.
         let snapshot = SessionReader::open(&path).await?;
-        let leaf = snapshot.leaf_id();
+        let mut leaf = snapshot.leaf_id();
         let ids = snapshot.issued_ids();
-        SessionWriter::open_append_with_state(&path, leaf, ids).await?
+
+        // ADR-032b — apply --fork-from BEFORE constructing the writer.
+        // We resolve the target id against the snapshot, validate it
+        // exists, then seed the writer with the rewound leaf so the
+        // next message's parent_id points at the fork point.
+        let forked = if let Some(target_str) = args.fork_from.as_deref() {
+            let target = EntryId(target_str.to_string());
+            let exists = snapshot.entries.iter().any(|e| e.id() == Some(&target));
+            if !exists {
+                anyhow::bail!("--fork-from `{target_str}`: entry id not found in session log");
+            }
+            eprintln!(
+                "[fork  ] rewinding leaf to `{target_str}` (previous leaf: {:?})",
+                leaf.as_ref().map(EntryId::as_str)
+            );
+            leaf = Some(target);
+            true
+        } else {
+            false
+        };
+
+        let writer = SessionWriter::open_append_with_state(&path, leaf.clone(), ids).await?;
+        if forked {
+            // Persist the cursor move as a LeafChange entry so the fork
+            // is replay-deterministic on the next reader.
+            writer.set_leaf_id(leaf.clone()).await?;
+        }
+
+        // When forking, the `prior_messages` computed by resolve_session
+        // reflected the ORIGINAL leaf's path. Re-derive from the rewound
+        // leaf so the agent loop resumes with the right context.
+        let messages = if forked {
+            snapshot.path_to_root(leaf)
+        } else {
+            prior_messages
+        };
+
+        (writer, messages)
     } else {
-        SessionWriter::create(
+        let w = SessionWriter::create(
             &path,
             SessionHeader::new(session_id, &model_id, SYSTEM_PROMPT),
         )
-        .await?
+        .await?;
+        (w, prior_messages)
     };
 
     // Touch the index — record this session's name/cwd as of now.

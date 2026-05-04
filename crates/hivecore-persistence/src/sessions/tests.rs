@@ -67,6 +67,92 @@ async fn rejects_file_missing_header() {
     assert!(format!("{err}").contains("missing header") || format!("{err}").contains("decode"));
 }
 
+// -- ADR-032b: fork via set_leaf_id --------------------------------------
+
+#[tokio::test]
+async fn fork_from_mid_tree_orphans_old_branch() {
+    let dir = TempDir::new().unwrap();
+    let session = SessionId::new();
+    let path = dir.path().join("s.jsonl");
+    let writer = SessionWriter::create(&path, SessionHeader::new(session, "m", "s"))
+        .await
+        .unwrap();
+    // Linear: m1 → m2 → m3.
+    for tag in ["m1", "m2", "m3"] {
+        writer
+            .emit(AgentEvent::MessageCommitted { message: user(tag) })
+            .await;
+    }
+
+    // Fork: rewind to m1 and append m4 there. m2 and m3 stay on disk
+    // but become unreferenced (orphaned) — replay from new leaf
+    // returns [m1, m4].
+    let snap = SessionReader::open(&path).await.unwrap();
+    let m1_id = snap
+        .entries
+        .iter()
+        .find_map(|e| match e {
+            SessionEntry::Message {
+                id,
+                message: AgentMessage::User { content, .. },
+                ..
+            } if matches!(&content[0], ContentBlock::Text { text } if text == "m1") => {
+                Some(id.clone())
+            }
+            _ => None,
+        })
+        .expect("m1 exists");
+    writer.set_leaf_id(Some(m1_id.clone())).await.unwrap();
+    writer
+        .emit(AgentEvent::MessageCommitted {
+            message: user("m4"),
+        })
+        .await;
+
+    let r = SessionReader::open(&path).await.unwrap();
+    let texts: Vec<String> = r
+        .messages()
+        .iter()
+        .filter_map(|m| match m {
+            AgentMessage::User { content, .. } => match &content[0] {
+                ContentBlock::Text { text } => Some(text.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        texts,
+        vec!["m1", "m4"],
+        "fork replay should drop orphaned m2/m3"
+    );
+
+    // m2 and m3 are still on disk (append-only invariant).
+    let on_disk_msg_count = r
+        .entries
+        .iter()
+        .filter(|e| matches!(e, SessionEntry::Message { .. }))
+        .count();
+    assert_eq!(on_disk_msg_count, 4, "all 4 messages must remain on disk");
+}
+
+#[tokio::test]
+async fn set_leaf_id_writes_leaf_change_entry() {
+    let dir = TempDir::new().unwrap();
+    let session = SessionId::new();
+    let path = dir.path().join("s.jsonl");
+    let writer = SessionWriter::create(&path, SessionHeader::new(session, "m", "s"))
+        .await
+        .unwrap();
+    writer
+        .emit(AgentEvent::MessageCommitted { message: user("a") })
+        .await;
+    let leaf_change_id = writer.set_leaf_id(None).await.unwrap();
+    assert!(!leaf_change_id.as_str().is_empty());
+    let r = SessionReader::open(&path).await.unwrap();
+    assert_eq!(r.leaf_id(), None);
+}
+
 // -- ADR-032: tree-shaped persistence ------------------------------------
 
 #[tokio::test]
