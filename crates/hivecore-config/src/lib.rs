@@ -19,8 +19,14 @@ pub mod agent;
 pub mod error;
 pub mod loader;
 pub mod registry;
+pub mod role;
+pub mod role_loader;
+pub mod role_registry;
 
 pub use agent::{Agent, ToolMode};
 pub use error::{ConfigError, ValidationError};
 pub use loader::AgentLoader;
 pub use registry::AgentRegistry;
+pub use role::Role;
+pub use role_loader::RoleLoader;
+pub use role_registry::RoleRegistry;

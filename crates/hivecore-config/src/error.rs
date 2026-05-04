@@ -32,4 +32,6 @@ pub enum ValidationError {
     MissingModelId,
     #[error("limits.max_iterations must be >= 1 (got {0})")]
     BadIterationLimit(u32),
+    #[error("role.prompt must be non-empty")]
+    EmptyRolePrompt,
 }

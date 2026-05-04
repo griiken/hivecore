@@ -24,6 +24,7 @@ hivecore-browser-runtime = { path = "../hivecore-browser-runtime" }
 hivecore-browser-harness = { path = "../hivecore-browser-harness" }
 hivecore-mcp-client = { path = "../hivecore-mcp-client" }
 hivecore-tool-policy = { path = "../hivecore-tool-policy" }
+hivecore-config = { path = "../hivecore-config" }
 
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }

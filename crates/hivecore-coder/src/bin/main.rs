@@ -20,6 +20,7 @@ use hivecore_browser_runtime::{ChromeConfig, ChromeProvider};
 use hivecore_builtin_tools::{default_set, WorkspaceRoot};
 use hivecore_coder::{CliPrompter, ClockTool, StderrSink, TurnBudgetHook};
 use hivecore_compaction::{CompactionConfig, SummarizingTransform, DEFAULT_COMPACTION_CONFIG};
+use hivecore_config::{Role, RoleLoader};
 use hivecore_execution_env::LocalEnv;
 use hivecore_mcp_client::{default_meta_tools, McpClient, McpRiskAugmenter, McpUserConfig};
 use hivecore_openai_adapter::{OpenAiAdapter, OpenAiClient, OpenAiConfig};
@@ -87,6 +88,19 @@ struct Args {
     /// Example: `--exclude bash,write_file` for read-only investigation mode.
     #[arg(long, value_delimiter = ',')]
     exclude: Vec<String>,
+
+    /// Apply a role overlay (ADR-033) to the agent's base system prompt for
+    /// this session. Looks up `<role-dir>/<name>.toml` (default `<workspace>/
+    /// .hivecore/roles/`). Role's `tools` field, if present, replaces the
+    /// tool registry at this scope (defence-in-depth allowlist).
+    #[arg(long)]
+    role: Option<String>,
+
+    /// Override the directory roles are loaded from. Defaults to
+    /// `<workspace>/.hivecore/roles/`. Tilde and relative paths resolve
+    /// against the current working directory.
+    #[arg(long)]
+    role_dir: Option<PathBuf>,
 
     /// The prompt to send. Multiple words are joined with spaces.
     #[arg(trailing_var_arg = true)]
@@ -223,6 +237,51 @@ async fn main() -> anyhow::Result<()> {
         Some(harness)
     };
 
+    // ADR-033 — role overlay. v0.1 binary surface supports session scope
+    // only (one `--role <name>` per process; the call/session/agent axis
+    // lands when `/role` slash commands and `SpawnAgentTool` argument
+    // wiring follow). Role is a runtime overlay; the on-disk session
+    // header keeps the base `SYSTEM_PROMPT` for replay parity.
+    let role: Option<Role> = if let Some(name) = args.role.as_deref() {
+        let dir = args
+            .role_dir
+            .clone()
+            .unwrap_or_else(|| workspace.join(".hivecore").join("roles"));
+        let role_path = dir.join(format!("{name}.toml"));
+        let r = RoleLoader::new()
+            .load_file(&role_path)
+            .map_err(|e| anyhow::anyhow!("role `{name}` load failed: {e}"))?;
+        eprintln!(
+            "[role  ] applying `{}` from {}",
+            r.name,
+            role_path.display()
+        );
+        Some(r)
+    } else {
+        None
+    };
+
+    // Apply role.tools allowlist override BEFORE --exclude refinement.
+    // Allowlist shrinks the tool set to exactly the listed names; exclude
+    // can then drop further. Defence-in-depth: model never sees a tool the
+    // role didn't sanction.
+    let tools = if let Some(allowlist) = role.as_ref().and_then(|r| r.tools.as_ref()) {
+        let allow: std::collections::HashSet<&str> = allowlist.iter().map(String::as_str).collect();
+        let n_before = tools.len();
+        let filtered: Vec<Arc<dyn Tool>> = tools
+            .into_iter()
+            .filter(|t| allow.contains(t.name()))
+            .collect();
+        eprintln!(
+            "[role  ] tools allowlist kept {} of {n_before}: {:?}",
+            filtered.len(),
+            allowlist
+        );
+        filtered
+    } else {
+        tools
+    };
+
     // ADR-029 A2 — static tool exclusion (Continue.dev `exclude` shape).
     // Filter applies after every tool source has registered (builtins +
     // MCP meta + browser) so the user can drop any of them.
@@ -276,9 +335,17 @@ async fn main() -> anyhow::Result<()> {
         )))
     };
 
+    // ADR-033 — overlay the role's prompt fragment onto the agent base
+    // prompt. Role guidance is always appended; agent identity stays first
+    // for prefix-cache stability across role switches.
+    let effective_prompt: String = match role.as_ref() {
+        Some(r) => format!("{SYSTEM_PROMPT}\n\n{}", r.prompt),
+        None => SYSTEM_PROMPT.to_string(),
+    };
+
     let mut builder = AgentLoop::builder()
         .session_id(session_id)
-        .system_prompt(SYSTEM_PROMPT)
+        .system_prompt(effective_prompt)
         .model(model, model_id)
         .tools(registry)
         .resume(prior_messages)
