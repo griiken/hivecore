@@ -1427,6 +1427,7 @@ dependencies = [
  "hivecore-browser-runtime",
  "hivecore-builtin-tools",
  "hivecore-compaction",
+ "hivecore-config",
  "hivecore-execution-env",
  "hivecore-mcp-client",
  "hivecore-openai-adapter",
