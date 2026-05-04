@@ -54,3 +54,9 @@ New ADR: copy template above into `docs/adr/<NNN>.md`, then add row below.
 | [028](./adr/028.md) | 2026-05-01 | Browser harness — hybrid a11y-snapshot + delegated vision |
 | [029](./adr/029.md) | 2026-05-03 | Human-in-the-loop approval primitive (Layer-1 trait + ACP wire shape) |
 | [030](./adr/030.md) | 2026-05-03 | Switch to Apache-2.0-only licensing (supersedes ADR-002) |
+| [031](./adr/031.md) | 2026-05-04 | `ExecutionEnv` trait — pluggable I/O for builtin tools |
+| [032](./adr/032.md) | 2026-05-04 | `SessionStore` trait + tree-shaped session log (supersedes ADR-026) |
+| [033](./adr/033.md) | 2026-05-04 | `Role` overlay above `Agent` (call/session/agent precedence) |
+| [034](./adr/034.md) | 2026-05-04 | Parallel tool dispatch with per-tool execution mode |
+| [035](./adr/035.md) | 2026-05-04 | `PostHookOutcome` early-stop hint |
+| [036](./adr/036.md) | 2026-05-04 | `LifecycleEvent::PreCompact` — observable compaction boundary |
